@@ -1,9 +1,9 @@
 ## 1. 变更骨架与契约基线
 
-- [ ] 1.1 建立模块目录骨架（frontend_app、analysis_orchestrator、platform_adapters、document_pipeline、experience_pipeline、highlight_pipeline、storage_layer）
-- [ ] 1.2 定义核心数据模型契约（Session、DocumentRef、NormalizedDocument、Chunk、Fact、Experience、Highlight）
+- [ ] 1.1 建立模块目录骨架（frontend_app、analysis_orchestrator、auth_service、platform_adapters、document_pipeline、experience_pipeline、highlight_pipeline、storage_layer）
+- [ ] 1.2 定义核心数据模型契约（Session、PlatformAuth、DocumentRef、NormalizedDocument、Chunk、Fact、Experience、Highlight）
 - [ ] 1.3 定义统一错误码与通用响应结构（含 partial_success 语义）
-- [ ] 1.4 建立状态机枚举与状态流转校验（doc_status、session_status、highlight_status）
+- [ ] 1.4 建立状态机枚举与状态流转校验（doc_status、session_status、highlight_status，且 doc_status 明确包含 auth_required/access_denied/parsing）
 
 ## 2. 会话与任务编排
 
@@ -14,12 +14,16 @@
 
 ## 3. 双平台接入（MVP 必做）
 
-- [ ] 3.1 实现飞书授权地址获取与回调处理流程
-- [ ] 3.2 实现语雀授权地址获取与回调处理流程
-- [ ] 3.3 实现飞书文档拉取与统一 schema 映射
-- [ ] 3.4 实现语雀文档拉取与统一 schema 映射
-- [ ] 3.5 补齐双平台契约一致性测试（输入、输出、错误语义一致）
-- [ ] 3.6 增加权限合规门禁：禁止绕过平台权限检查，未授权访问必须失败
+- [ ] 3.1 实现 `auth_service` 的飞书授权地址获取与回调处理，并写入飞书授权状态
+- [ ] 3.2 实现 `auth_service` 的飞书 token 刷新与失效处理
+- [ ] 3.3 实现 `auth_service` 的语雀 Access Token 录入、校验、保存、删除
+- [ ] 3.4 实现 `auth_service` 的通用授权状态查询（按平台返回 auth_status 与 last_verified_at）
+- [ ] 3.5 完成飞书最小接入验证（OAuth 回调、token 交换、最小文档读取闭环）
+- [ ] 3.6 完成语雀最小接入验证（手动 token 校验、保存/删除、最小文档读取闭环）
+- [ ] 3.7 实现飞书文档拉取与统一 schema 映射
+- [ ] 3.8 实现语雀文档拉取与统一 schema 映射
+- [ ] 3.9 补齐双平台契约一致性测试（输出 schema 与错误语义一致，认证接口保持差异化）
+- [ ] 3.10 增加权限合规门禁：禁止绕过平台权限检查，未授权访问必须失败
 
 ## 4. 文档处理链路（结构化中间层）
 
@@ -60,10 +64,11 @@
 ## 9. 隐私与存储约束落地
 
 - [ ] 9.1 实现 token 安全存储与传输保护（加密、过期、作用域隔离）
-- [ ] 9.2 实现最小化存储策略（仅保留必要结构化字段与证据片段）
-- [ ] 9.3 提供私有化部署配置说明（存储后端、环境变量、网络边界）
-- [ ] 9.4 增加隐私与安全审计检查项（访问日志、异常告警、清理确认）
-- [ ] 9.5 增加凭证安全策略：不接收明文长期 token 输入，不在日志/报错中暴露 token
+- [ ] 9.2 实现 `PlatformAuth` 落库与加密存储（access_token_encrypted、refresh_token_encrypted、token_expire_at、last_verified_at）
+- [ ] 9.3 实现最小化存储策略（仅保留必要结构化字段与证据片段）
+- [ ] 9.4 提供私有化部署配置说明（存储后端、环境变量、网络边界）
+- [ ] 9.5 增加隐私与安全审计检查项（访问日志、异常告警、清理确认）
+- [ ] 9.6 增加凭证安全策略：不接收明文长期 token 输入，不在日志/报错中暴露 token
 
 ## 10. 验收与回归
 
