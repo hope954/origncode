@@ -1,36 +1,36 @@
 ## 1. 变更骨架与契约基线
 
-- [ ] 1.1 建立模块目录骨架（frontend_app、analysis_orchestrator、auth_service、platform_adapters、document_pipeline、experience_pipeline、highlight_pipeline、storage_layer）
-- [ ] 1.2 定义核心数据模型契约（Session、PlatformAuth、DocumentRef、NormalizedDocument、Chunk、Fact、Experience、Highlight）
-- [ ] 1.3 定义统一错误码与通用响应结构（含 partial_success 语义）
-- [ ] 1.4 建立状态机枚举与状态流转校验（doc_status、session_status、highlight_status，且 doc_status 明确包含 auth_required/access_denied/parsing）
+- [x] 1.1 建立模块目录骨架（frontend_app、analysis_orchestrator、auth_service、platform_adapters、document_pipeline、experience_pipeline、highlight_pipeline、storage_layer）
+- [x] 1.2 定义核心数据模型契约（Session、PlatformAuth、DocumentRef、NormalizedDocument、Chunk、Fact、Experience、Highlight）
+- [x] 1.3 定义统一错误码与通用响应结构（含 partial_success 语义）
+- [x] 1.4 建立状态机枚举与状态流转校验（doc_status、session_status、highlight_status，且 doc_status 明确包含 auth_required/access_denied/parsing）
 
 ## 2. 会话与任务编排
 
-- [ ] 2.1 实现 `session/create` 契约并校验必填参数（target_job、styles、desired_highlight_count）
-- [ ] 2.2 实现分析任务创建与异步执行入口（task_id 返回、轮询查询）
-- [ ] 2.3 实现会话级状态推进与文档级状态聚合
-- [ ] 2.4 实现 `partial_success` 判定与失败文档明细回传
+- [x] 2.1 实现 `session/create` 契约并校验必填参数（target_job、styles、desired_highlight_count）
+- [x] 2.2 实现分析任务创建与异步执行入口（task_id 返回、轮询查询）
+- [x] 2.3 实现会话级状态推进与文档级状态聚合
+- [x] 2.4 实现 `partial_success` 判定与失败文档明细回传
 
 ## 3. 双平台接入（MVP 必做）
 
-- [ ] 3.1 实现 `auth_service` 的飞书授权地址获取与回调处理，并写入飞书授权状态
-- [ ] 3.2 实现 `auth_service` 的飞书 token 刷新与失效处理
-- [ ] 3.3 实现 `auth_service` 的语雀 Access Token 录入、校验、保存、删除
-- [ ] 3.4 实现 `auth_service` 的通用授权状态查询（按平台返回 auth_status 与 last_verified_at）
-- [ ] 3.5 完成飞书最小接入验证（OAuth 回调、token 交换、最小文档读取闭环）
-- [ ] 3.6 完成语雀最小接入验证（手动 token 校验、保存/删除、最小文档读取闭环）
-- [ ] 3.7 实现飞书文档拉取与统一 schema 映射
-- [ ] 3.8 实现语雀文档拉取与统一 schema 映射
-- [ ] 3.9 补齐双平台契约一致性测试（输出 schema 与错误语义一致，认证接口保持差异化）
-- [ ] 3.10 增加权限合规门禁：禁止绕过平台权限检查，未授权访问必须失败
+- [x] 3.1 实现 `auth_service` 的飞书授权地址获取与回调处理，并写入飞书授权状态
+- [x] 3.2 实现 `auth_service` 的飞书 token 刷新与失效处理
+- [x] 3.3 实现 `auth_service` 的语雀 Access Token 录入、校验、保存、删除
+- [x] 3.4 实现 `auth_service` 的通用授权状态查询（按平台返回 auth_status 与 last_verified_at）
+- [x] 3.5 完成飞书最小接入验证（OAuth 回调、token 交换、最小文档读取闭环）
+- [x] 3.6 完成语雀最小接入验证（手动 token 校验、保存/删除、最小文档读取闭环）
+- [x] 3.7 实现飞书文档拉取与统一 schema 映射
+- [x] 3.8 实现语雀文档拉取与统一 schema 映射
+- [x] 3.9 补齐双平台契约一致性测试（输出 schema 与错误语义一致，认证接口保持差异化）
+- [x] 3.10 增加权限合规门禁：禁止绕过平台权限检查，未授权访问必须失败
 
 ## 4. 文档处理链路（结构化中间层）
 
-- [ ] 4.1 实现 `document_normalizer`（格式统一、标题路径保留）
-- [ ] 4.2 实现 `content_cleaner`（噪音清理与低价值内容过滤规则）
-- [ ] 4.3 实现 `chunker`（语义切片、长度控制、relevance_score 打分）
-- [ ] 4.4 持久化 chunk 层并建立 chunk -> doc 映射索引
+- [x] 4.1 实现 `document_normalizer`（格式统一、标题路径保留）
+- [x] 4.2 实现 `content_cleaner`（噪音清理与低价值内容过滤规则）
+- [x] 4.3 实现 `chunker`（语义切片、长度控制、relevance_score 打分）
+- [x] 4.4 持久化 chunk 层并建立 chunk -> doc 映射索引
 
 ## 5. 事实抽取与经历聚合
 
@@ -63,9 +63,9 @@
 
 ## 9. 隐私与存储约束落地
 
-- [ ] 9.1 实现 token 安全存储与传输保护（加密、过期、作用域隔离）
-- [ ] 9.2 实现 `PlatformAuth` 落库与加密存储（access_token_encrypted、refresh_token_encrypted、token_expire_at、last_verified_at）
-- [ ] 9.3 实现最小化存储策略（仅保留必要结构化字段与证据片段）
+- [x] 9.1 实现 token 安全存储与传输保护（加密、过期、作用域隔离）
+- [x] 9.2 实现 `PlatformAuth` 落库与加密存储（access_token_encrypted、refresh_token_encrypted、token_expire_at、last_verified_at）
+- [x] 9.3 实现最小化存储策略（仅保留必要结构化字段与证据片段）
 - [ ] 9.4 提供私有化部署配置说明（存储后端、环境变量、网络边界）
 - [ ] 9.5 增加隐私与安全审计检查项（访问日志、异常告警、清理确认）
 - [ ] 9.6 增加凭证安全策略：不接收明文长期 token 输入，不在日志/报错中暴露 token
