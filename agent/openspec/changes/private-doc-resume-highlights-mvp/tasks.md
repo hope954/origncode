@@ -1,3 +1,9 @@
+## 1.5 基础收口（API 与职责边界）
+
+- [x] 1.5.1 收敛 `auth_service` 与 `platform_adapters`：认证仅 auth_service；适配器仅拉取与映射
+- [x] 1.5.2 统一文档导入路径为 `POST /api/docs/import`；明确 `POST /api/auth/refresh` 仅 Feishu
+- [x] 1.5.3 README / 代码注释标注 mock 与真实接入替换点；补充错误分支测试
+
 ## 1. 变更骨架与契约基线
 
 - [x] 1.1 建立模块目录骨架（frontend_app、analysis_orchestrator、auth_service、platform_adapters、document_pipeline、experience_pipeline、highlight_pipeline、storage_layer）

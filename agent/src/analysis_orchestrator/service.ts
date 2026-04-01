@@ -1,3 +1,7 @@
+/**
+ * Orchestrates session lifecycle and document pipeline up to Chunk persistence.
+ * Document body comes from platform adapters (mock fetch in stage 1); phase 2 consumes Chunk → Fact without relying on mock HTTP semantics.
+ */
 import { chunker } from "../document_pipeline/chunker.js";
 import { contentCleaner } from "../document_pipeline/cleaner.js";
 import { documentNormalizer } from "../document_pipeline/normalizer.js";

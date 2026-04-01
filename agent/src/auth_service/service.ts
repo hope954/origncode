@@ -1,3 +1,11 @@
+/**
+ * Auth service — OAuth / token lifecycle and Yuque manual token.
+ *
+ * MOCK FEISHU EXCHANGE: `handleFeishuCallback` and `refreshFeishuToken` synthesize tokens
+ * from auth_code / refresh material. Real implementation must call Feishu token endpoints
+ * and map responses (see README “真实平台接入待替换点”). Phase 2 must not assume these mocks
+ * are real API semantics.
+ */
 import { config } from "../config.js";
 import { Repository } from "../storage/repository.js";
 import type { Platform, PlatformAuth, PlatformAuthStatus } from "../types.js";

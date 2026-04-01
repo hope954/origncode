@@ -1,3 +1,8 @@
+/**
+ * HTTP API — wiring only. Auth vs document fetch boundaries:
+ * - Feishu/Yuque document pull + schema mapping: `platform_adapters/*Adapter` (given decrypted token).
+ * - OAuth, refresh, Yuque token CRUD: `auth_service`.
+ */
 import express from "express";
 import { z } from "zod";
 import { AuthService } from "./auth_service/service.js";
@@ -53,9 +58,23 @@ export function createApp() {
     return res.json({ code: "ok", data: { platform: auth.platform, auth_status: auth.auth_status } });
   });
 
+  // Feishu only: exchanges refresh_token for new user_access_token. Yuque has no refresh here — use yuque token save/delete.
   app.post("/api/auth/refresh", (req, res) => {
-    const body = z.object({ platform: z.literal("feishu"), user_id: z.string(), session_id: z.string().optional() }).safeParse(req.body);
+    const body = z
+      .object({
+        platform: z.enum(["feishu", "yuque"]),
+        user_id: z.string(),
+        session_id: z.string().optional()
+      })
+      .safeParse(req.body);
     if (!body.success) return res.status(400).json({ code: "invalid_request" });
+    if (body.data.platform !== "feishu") {
+      return res.status(400).json({
+        code: "unsupported_platform",
+        message:
+          "POST /api/auth/refresh is defined for Feishu OAuth refresh only. Yuque uses POST /api/auth/yuque/token/save and related endpoints."
+      });
+    }
     const refreshed = authService.refreshFeishuToken(body.data.user_id, body.data.session_id);
     if (!refreshed) return res.status(400).json({ code: "token_invalid" });
     return res.json({ code: "ok", data: { platform: "feishu", auth_status: refreshed.auth_status } });
@@ -91,7 +110,7 @@ export function createApp() {
     return res.json({ code: "ok", data: authService.getStatus(userId, sessionId) });
   });
 
-  app.post("/api/doc/import", (req, res) => {
+  app.post("/api/docs/import", (req, res) => {
     const parsed = importSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ code: "invalid_request" });
     const docs = orchestrator.importDocuments(parsed.data.session_id, parsed.data.docs);
