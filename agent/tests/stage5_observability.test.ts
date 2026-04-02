@@ -49,6 +49,17 @@ describe("stage5 round1 - request_id / error_context", () => {
     expect(res.body.data.error_context.platform).toBe("yuque");
   });
 
+  it("keeps request_id and error_context on yuque token delete invalid_params", async () => {
+    const app = createApp();
+    const res = await request(app).post("/api/auth/yuque/token/delete").send({}).expect(400);
+    expect(res.headers["x-request-id"]).toBeTruthy();
+    expect(res.body.request_id).toBeTruthy();
+    expect(res.headers["x-request-id"]).toBe(res.body.request_id);
+    expect(res.body.code).toBe(ApiCode.INVALID_PARAMS);
+    expect(res.body.data?.error_context?.stage).toBe("yuque_token_delete");
+    expect(res.body.data?.error_context?.request_id).toBe(res.body.request_id);
+  });
+
   it("maps access_denied vs auth_required (token_expired/invalid) at API layer distinctly", async () => {
     const app = createApp();
     const session = await request(app).post("/api/session/create").send({

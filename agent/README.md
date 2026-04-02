@@ -166,6 +166,8 @@ On push/PR to `main` or `master`, **GitHub Actions** workflow **`.github/workflo
 
 See **`docs/deployment-and-operations.md`**（私有化部署、环境变量、存储、mock 替换说明、安全审计与发布前检查清单）。
 
+Frontend integration: see **`docs/frontend-integration.md`**（平台连接状态、稳定响应结构、状态语义与前端展示建议）。
+
 ---
 
 ## Local run (server)

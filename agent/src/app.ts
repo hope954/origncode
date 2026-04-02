@@ -257,9 +257,17 @@ export function createApp() {
 
   app.post("/api/auth/yuque/token/delete", (req, res) => {
     const body = z.object({ user_id: z.string(), session_id: z.string().optional() }).safeParse(req.body);
-    if (!body.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!body.success) {
+      return sendErr(
+        res,
+        400,
+        ApiCode.INVALID_PARAMS,
+        "invalid_params",
+        buildErrorContext({ stage: "yuque_token_delete", reason: "invalid_params" })
+      );
+    }
     authService.deleteYuqueToken(body.data.user_id, body.data.session_id);
-    return res.json(okBody({}));
+    return sendOk(res, {});
   });
 
   app.get("/api/auth/status", (req, res) => {
