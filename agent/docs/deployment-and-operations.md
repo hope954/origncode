@@ -21,6 +21,20 @@
 | `TOKEN_ENCRYPTION_KEY` | 生产建议 | 用于 `access_token` / `refresh_token` 对称加密；需与 `.env.example` 说明一致（长度/编码要求）。缺失时开发环境可能使用占位，**不得用于生产**。 |
 | `PORT` | 否 | HTTP 监听端口（若 `server.ts` 暴露）。 |
 
+### 第四阶段真实接入新增配置（规划中，当前代码默认未消费）
+
+| 变量 | 计划用途 |
+|------|----------|
+| `FEISHU_APP_ID` | 飞书 OAuth `auth_code -> user_access_token` 交换时的客户端标识 |
+| `FEISHU_APP_SECRET` | 飞书 OAuth / refresh 调用所需密钥，必须仅后端持有 |
+| `FEISHU_REDIRECT_URI` | 飞书回调地址；需与飞书应用配置保持一致 |
+| `FEISHU_BASE_URL` | 飞书 Open API 基础地址；默认官方域名，私有区域或网关代理场景可覆盖 |
+| `YUQUE_BASE_URL` | 语雀 Open API 基础地址；用于 token 校验与文档拉取 |
+
+说明：
+- `TOKEN_ENCRYPTION_KEY` 在第四阶段继续沿用，用于加密保存 **飞书 access/refresh token** 与 **语雀 access token**。
+- 上述第四阶段变量应先写入 `.env.example` 与部署文档，再在下一轮代码替换时接入 `src/config.ts` / `auth_service` / `platform_adapters`。
+
 复制 `.env.example` → `.env` 并按环境填写。勿将 `.env` 提交到版本库。
 
 ---
@@ -38,6 +52,7 @@
 - **认证**：`auth_service` 负责 OAuth / token；**当前**飞书 token 为本地合成字符串，语雀为前缀校验 + 保存。
 - **文档**：`FeishuAdapter` / `YuqueAdapter` 返回 **固定文本**；解析后进入统一 `NormalizedDocument` 与 chunk 管线。
 - **替换步骤**：见根目录 `README.md`「真实平台接入待替换点」清单；**不得**在 `resume` 保存/删除/会话清理逻辑中插入平台特判 — 第三阶段路由与 `session_lifecycle` 仅依赖仓库内结构化数据。
+- **测试策略**：CI 不直接访问真实飞书 / 语雀；第四阶段推荐使用 **协议层 HTTP mock + fixture JSON + adapter 映射测试**，手工验证单独执行。
 
 ---
 
