@@ -81,6 +81,37 @@
 
 ---
 
+## 7. 最小排障说明（Stage 5 Round 1）
+
+本服务已实现最小可观测性与排障信号：
+
+- **`request_id`**：
+  - 每个 HTTP 响应 body 都包含 `request_id`（Master Spec §15.1）。
+  - 服务也会在响应头返回 `x-request-id`。
+  - 你可以在请求时主动传入 `x-request-id` 以贯穿前后端链路（推荐用于前端产品化阶段）。
+
+- **结构化日志（JSON lines）**：
+  - 每条关键事件会打印一条 JSON 日志，字段包含 `event`、`request_id` 与最小必要上下文。
+  - **不会**打印 token 明文，**不会**打印文档全文（有截断与脱敏）。
+
+- **machine-readable 错误上下文**：
+  - 错误响应会包含 `data.error_context`，可用于自动化聚合与定位（不含敏感 token/正文）。
+
+常用定位方法：
+
+1. 从前端/调用方拿到某次失败的 `request_id`
+2. 在服务日志中搜索该 `request_id`
+3. 关注以下事件：
+   - `session.create.*`
+   - `auth.feishu.*`、`auth.yuque.*`
+   - `document.fetch.*`
+   - `analysis.*`、`resume.analyze.*`
+4. 对照错误 `reason`（统一语义）：
+   - `token_expired`：token 过期（飞书常见）
+   - `token_invalid`：token 无效（语雀常见）
+   - `access_denied`：有 token 但无权限访问该文档
+   - `fetch_failed`：平台接口异常/URL 不支持/网络问题等
+
 ## 7. 相关文档
 
 - `README.md` — 功能范围、API 表、本地与 CI 验证命令。

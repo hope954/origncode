@@ -16,6 +16,9 @@ import { YuqueAdapter } from "./platform_adapters/yuqueAdapter.js";
 import { Repository } from "./storage/repository.js";
 import { ResumePipelineService } from "./resume_pipeline/service.js";
 import { clearSessionData } from "./session_lifecycle/clear_session.js";
+import { makeId } from "./utils/id.js";
+import { logEvent } from "./http/logger.js";
+import { buildErrorContext, mapErrorReasonToApi } from "./http/error_mapping.js";
 
 const sessionSchema = z.object({
   user_id: z.string().min(1),
@@ -66,50 +69,120 @@ export function createApp() {
   const app = express();
   app.use(express.json());
 
+  // request_id / correlation_id middleware (Master Spec §15.1)
+  app.use((req, res, next) => {
+    const incoming =
+      (typeof req.headers["x-request-id"] === "string" && req.headers["x-request-id"]) ||
+      (typeof req.headers["x-correlation-id"] === "string" && req.headers["x-correlation-id"]) ||
+      undefined;
+    const safeIncoming =
+      incoming && /^[a-zA-Z0-9._-]{6,80}$/.test(incoming) ? incoming : undefined;
+    const requestId = safeIncoming ?? makeId("req");
+    res.locals.request_id = requestId;
+    res.setHeader("x-request-id", requestId);
+    next();
+  });
+
   const repo = new Repository();
   const authService = new AuthService(repo);
   const orchestrator = new AnalysisOrchestrator(repo, authService, new FeishuAdapter(), new YuqueAdapter());
   const resumePipeline = new ResumePipelineService(repo);
 
+  function requestIdFrom(res: express.Response): string {
+    return String((res.locals as { request_id?: string }).request_id ?? makeId("req"));
+  }
+
+  function sendOk<T>(res: express.Response, data: T) {
+    const request_id = requestIdFrom(res);
+    return res.json({ ...okBody(data), request_id });
+  }
+
+  function sendErr(
+    res: express.Response,
+    httpStatus: number,
+    code: number,
+    message: string,
+    errorContext?: Record<string, unknown>
+  ) {
+    const request_id = requestIdFrom(res);
+    const data = errorContext ? { error_context: errorContext } : undefined;
+    return res.status(httpStatus).json({ ...errBody(code as never, message, data), request_id });
+  }
+
   app.post("/api/session/create", (req, res) => {
+    logEvent("info", "session.create.start", { request_id: requestIdFrom(res) });
     const parsed = sessionSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!parsed.success) {
+      logEvent("warn", "session.create.failed", {
+        request_id: requestIdFrom(res),
+        reason: "invalid_params"
+      });
+      return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "session_create", reason: "invalid_params" }));
+    }
     const session = orchestrator.createSession(parsed.data);
-    return res.json(okBody(session));
+    logEvent("info", "session.create.success", { request_id: requestIdFrom(res), session_id: session.session_id });
+    return sendOk(res, session);
   });
 
   app.post("/api/session/clear", (req, res) => {
     const parsed = sessionClearSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!parsed.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "session_clear", reason: "invalid_params" }));
     const result = clearSessionData(repo, parsed.data.session_id, parsed.data.user_id);
     if (!result.ok && result.reason === "not_found") {
-      return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
+      return sendErr(res, 404, ApiCode.NOT_FOUND, "not_found", buildErrorContext({ stage: "session_clear", reason: "not_found", session_id: parsed.data.session_id }));
     }
     if (!result.ok && result.reason === "forbidden") {
-      return res.status(403).json(errBody(ApiCode.ACCESS_DENIED, "access_denied"));
+      return sendErr(res, 403, ApiCode.ACCESS_DENIED, "access_denied", buildErrorContext({ stage: "session_clear", reason: "access_denied", session_id: parsed.data.session_id }));
     }
-    return res.json(okBody({ session_id: parsed.data.session_id, cleared: true }));
+    logEvent("info", "session.clear.success", { request_id: requestIdFrom(res), session_id: parsed.data.session_id });
+    return sendOk(res, { session_id: parsed.data.session_id, cleared: true });
   });
 
   app.get("/api/auth/url", (req, res) => {
     const platform = req.query.platform;
-    if (platform !== "feishu") return res.status(400).json(errBody(ApiCode.UNSUPPORTED_PLATFORM, "unsupported_platform"));
+    if (platform !== "feishu") {
+      return sendErr(res, 400, ApiCode.UNSUPPORTED_PLATFORM, "unsupported_platform", buildErrorContext({ stage: "auth_url", reason: "unsupported_platform" }));
+    }
     const userId = String(req.query.user_id ?? "");
     const sessionId = String(req.query.session_id ?? "");
-    return res.json(okBody({ auth_url: authService.getAuthUrl(userId, sessionId) }));
+    logEvent("info", "auth.feishu.url", { request_id: requestIdFrom(res), user_id: userId, session_id: sessionId });
+    return sendOk(res, { auth_url: authService.getAuthUrl(userId, sessionId) });
   });
 
   // async: handleFeishuCallback makes real HTTP when FEISHU_APP_ID is configured
   app.post("/api/auth/callback", async (req, res) => {
     const body = z.object({ user_id: z.string(), session_id: z.string(), auth_code: z.string() }).safeParse(req.body);
-    if (!body.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!body.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "auth_callback", reason: "invalid_params" }));
     try {
+      logEvent("info", "auth.feishu.callback.start", {
+        request_id: requestIdFrom(res),
+        user_id: body.data.user_id,
+        session_id: body.data.session_id
+      });
       const auth = await authService.handleFeishuCallback(body.data.user_id, body.data.session_id, body.data.auth_code);
-      return res.json(okBody({ platform: auth.platform, auth_status: auth.auth_status }));
+      logEvent("info", "auth.feishu.callback.success", {
+        request_id: requestIdFrom(res),
+        user_id: body.data.user_id,
+        session_id: body.data.session_id,
+        auth_status: auth.auth_status
+      });
+      return sendOk(res, { platform: auth.platform, auth_status: auth.auth_status });
     } catch (err) {
       const reason = (err as { reason?: string }).reason ?? "auth_required";
-      if (reason === "token_invalid") return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_invalid"));
-      return res.status(400).json(errBody(ApiCode.AUTH_REQUIRED, "auth_required"));
+      const mapped = mapErrorReasonToApi(reason);
+      logEvent("warn", "auth.feishu.callback.failed", {
+        request_id: requestIdFrom(res),
+        user_id: body.success ? body.data.user_id : undefined,
+        session_id: body.success ? body.data.session_id : undefined,
+        reason
+      });
+      return sendErr(
+        res,
+        400,
+        mapped.code,
+        mapped.message,
+        buildErrorContext({ stage: "auth_callback", platform: "feishu", reason, user_id: body.success ? body.data.user_id : undefined, session_id: body.success ? body.data.session_id : undefined })
+      );
     }
   });
 
@@ -122,43 +195,57 @@ export function createApp() {
         session_id: z.string().optional()
       })
       .safeParse(req.body);
-    if (!body.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!body.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "auth_refresh", reason: "invalid_params" }));
     if (body.data.platform !== "feishu") {
-      return res.status(400).json(
-        errBody(ApiCode.UNSUPPORTED_PLATFORM, "unsupported_platform", {
-          detail:
-            "POST /api/auth/refresh is defined for Feishu OAuth refresh only. Yuque uses POST /api/auth/yuque/token/save and related endpoints."
-        })
+      return sendErr(
+        res,
+        400,
+        ApiCode.UNSUPPORTED_PLATFORM,
+        "unsupported_platform",
+        buildErrorContext({ stage: "auth_refresh", platform: body.data.platform, reason: "unsupported_platform" })
       );
     }
     try {
+      logEvent("info", "auth.feishu.refresh.start", { request_id: requestIdFrom(res), user_id: body.data.user_id, session_id: body.data.session_id });
       const refreshed = await authService.refreshFeishuToken(body.data.user_id, body.data.session_id);
-      if (!refreshed) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_invalid"));
-      return res.json(okBody({ platform: "feishu", auth_status: refreshed.auth_status }));
+      if (!refreshed) {
+        const mapped = mapErrorReasonToApi("token_invalid");
+        logEvent("warn", "auth.feishu.refresh.failed", { request_id: requestIdFrom(res), user_id: body.data.user_id, session_id: body.data.session_id, reason: "token_invalid" });
+        return sendErr(res, 400, mapped.code, mapped.message, buildErrorContext({ stage: "auth_refresh", platform: "feishu", reason: "token_invalid", user_id: body.data.user_id, session_id: body.data.session_id }));
+      }
+      logEvent("info", "auth.feishu.refresh.success", { request_id: requestIdFrom(res), user_id: body.data.user_id, session_id: body.data.session_id, auth_status: refreshed.auth_status });
+      return sendOk(res, { platform: "feishu", auth_status: refreshed.auth_status });
     } catch (err) {
       const reason = (err as { reason?: string }).reason ?? "token_expired";
-      if (reason === "token_revoked") return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_revoked"));
-      return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_expired"));
+      const mapped = mapErrorReasonToApi(reason);
+      logEvent("warn", "auth.feishu.refresh.failed", { request_id: requestIdFrom(res), user_id: body.data.user_id, session_id: body.data.session_id, reason });
+      return sendErr(res, 400, mapped.code, mapped.message, buildErrorContext({ stage: "auth_refresh", platform: "feishu", reason, user_id: body.data.user_id, session_id: body.data.session_id }));
     }
   });
 
   // async: verifyYuqueToken may probe real API when YUQUE_LIVE_VERIFY=1
   app.post("/api/auth/yuque/token/verify", async (req, res) => {
     const body = z.object({ token: z.string() }).safeParse(req.body);
-    if (!body.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!body.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "yuque_token_verify", reason: "invalid_params" }));
+    logEvent("info", "auth.yuque.verify.start", { request_id: requestIdFrom(res) });
     const valid = await authService.verifyYuqueToken(body.data.token);
-    return res.json(okBody({ valid }));
+    logEvent("info", "auth.yuque.verify.done", { request_id: requestIdFrom(res), valid });
+    return sendOk(res, { valid });
   });
 
   // async: saveYuqueToken awaits verifyYuqueToken
   app.post("/api/auth/yuque/token/save", async (req, res) => {
     const body = z.object({ user_id: z.string(), session_id: z.string().optional(), token: z.string() }).safeParse(req.body);
-    if (!body.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!body.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "yuque_token_save", reason: "invalid_params" }));
     try {
+      logEvent("info", "auth.yuque.save.start", { request_id: requestIdFrom(res), user_id: body.data.user_id, session_id: body.data.session_id });
       const auth = await authService.saveYuqueToken(body.data);
-      return res.json(okBody({ platform: auth.platform, auth_status: auth.auth_status }));
+      logEvent("info", "auth.yuque.save.success", { request_id: requestIdFrom(res), user_id: body.data.user_id, session_id: body.data.session_id, auth_status: auth.auth_status });
+      return sendOk(res, { platform: auth.platform, auth_status: auth.auth_status });
     } catch {
-      return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_invalid"));
+      const mapped = mapErrorReasonToApi("token_invalid");
+      logEvent("warn", "auth.yuque.save.failed", { request_id: requestIdFrom(res), user_id: body.success ? body.data.user_id : undefined, session_id: body.success ? body.data.session_id : undefined, reason: "token_invalid" });
+      return sendErr(res, 400, mapped.code, mapped.message, buildErrorContext({ stage: "yuque_token_save", platform: "yuque", reason: "token_invalid", user_id: body.success ? body.data.user_id : undefined, session_id: body.success ? body.data.session_id : undefined }));
     }
   });
 
@@ -172,54 +259,56 @@ export function createApp() {
   app.get("/api/auth/status", (req, res) => {
     const userId = String(req.query.user_id ?? "");
     const sessionId = req.query.session_id ? String(req.query.session_id) : undefined;
-    return res.json(okBody(authService.getStatus(userId, sessionId)));
+    return sendOk(res, authService.getStatus(userId, sessionId));
   });
 
   app.post("/api/docs/import", (req, res) => {
     const parsed = importSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!parsed.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "docs_import", reason: "invalid_params" }));
     const docs = orchestrator.importDocuments(parsed.data.session_id, parsed.data.docs);
-    return res.json(okBody(docs));
+    logEvent("info", "docs.import", { request_id: requestIdFrom(res), session_id: parsed.data.session_id, docs_count: parsed.data.docs.length });
+    return sendOk(res, docs);
   });
 
   // async: orchestrator.startTask awaits adapter.fetchDocument (real HTTP when configured)
   app.post("/api/analysis/start", async (req, res) => {
     const parsed = analysisSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
-    const task = await orchestrator.startTask(parsed.data.session_id, parsed.data.user_id);
-    return res.json(okBody({ task_id: task.task_id }));
+    if (!parsed.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "analysis_start", reason: "invalid_params" }));
+    logEvent("info", "analysis.start", { request_id: requestIdFrom(res), session_id: parsed.data.session_id, user_id: parsed.data.user_id });
+    const task = await orchestrator.startTask(parsed.data.session_id, parsed.data.user_id, { request_id: requestIdFrom(res) });
+    logEvent("info", "analysis.done", { request_id: requestIdFrom(res), session_id: parsed.data.session_id, task_status: task.status, task_id: task.task_id });
+    return sendOk(res, { task_id: task.task_id });
   });
 
   app.get("/api/analysis/task", (req, res) => {
     const taskId = String(req.query.task_id ?? "");
     const task = orchestrator.getTask(taskId);
-    if (!task) return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
-    return res.json(okBody(task));
+    if (!task) return sendErr(res, 404, ApiCode.NOT_FOUND, "not_found", buildErrorContext({ stage: "analysis_task", reason: "not_found", task_id: taskId }));
+    return sendOk(res, task);
   });
 
   app.get("/api/analysis/result", (req, res) => {
     const sessionId = String(req.query.session_id ?? "");
-    return res.json(okBody(orchestrator.getSessionResult(sessionId)));
+    return sendOk(res, orchestrator.getSessionResult(sessionId));
   });
 
   app.post("/api/resume/analyze", (req, res) => {
     const parsed = resumeAnalyzeSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!parsed.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "resume_analyze", reason: "invalid_params" }));
+    logEvent("info", "resume.analyze.start", { request_id: requestIdFrom(res), session_id: parsed.data.session_id });
     const task = resumePipeline.runAnalyze(parsed.data);
     if (task.status === "failed") {
-      return res.status(400).json(
-        errBody(ApiCode.GENERATION_FAILED, "generation_failed", {
-          task_id: task.task_id,
-          status: task.status
-        })
+      logEvent("warn", "resume.analyze.failed", { request_id: requestIdFrom(res), session_id: parsed.data.session_id, reason: "generation_failed" });
+      return sendErr(
+        res,
+        400,
+        ApiCode.GENERATION_FAILED,
+        "generation_failed",
+        buildErrorContext({ stage: "resume_analyze", reason: "generation_failed", session_id: parsed.data.session_id, task_id: task.task_id })
       );
     }
-    return res.json(
-      okBody({
-        task_id: task.task_id,
-        status: task.status
-      })
-    );
+    logEvent("info", "resume.analyze.done", { request_id: requestIdFrom(res), session_id: parsed.data.session_id, status: task.status, task_id: task.task_id });
+    return sendOk(res, { task_id: task.task_id, status: task.status });
   });
 
   app.get("/api/resume/result", (req, res) => {
@@ -233,89 +322,63 @@ export function createApp() {
       confidence_score: h.confidence_score,
       is_edited: h.is_edited
     }));
-    return res.json(
-      okBody({
-        session_id: bundle.session_id,
-        status: bundle.status,
-        highlights,
-        warnings: bundle.warnings
-      })
-    );
+    return sendOk(res, { session_id: bundle.session_id, status: bundle.status, highlights, warnings: bundle.warnings });
   });
 
   app.get("/api/resume/evidence", (req, res) => {
     const highlightId = String(req.query.highlight_id ?? "");
     const ev = resumePipeline.getEvidence(highlightId);
-    if (!ev) return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
-    return res.json(okBody(ev));
+    if (!ev) return sendErr(res, 404, ApiCode.NOT_FOUND, "not_found", buildErrorContext({ stage: "resume_evidence", reason: "not_found", highlight_id: highlightId }));
+    return sendOk(res, ev);
   });
 
   app.post("/api/resume/rewrite", (req, res) => {
     const parsed = resumeRewriteSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!parsed.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "resume_rewrite", reason: "invalid_params" }));
     const next = resumePipeline.rewriteHighlight(
       parsed.data.highlight_id,
       parsed.data.style,
       parsed.data.target_job
     );
-    if (!next) return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
-    return res.json(
-      okBody({
-        highlight_id: next.highlight_id,
-        rewritten_content: next.final_content
-      })
-    );
+    if (!next) return sendErr(res, 404, ApiCode.NOT_FOUND, "not_found", buildErrorContext({ stage: "resume_rewrite", reason: "not_found", highlight_id: parsed.data.highlight_id }));
+    return sendOk(res, { highlight_id: next.highlight_id, rewritten_content: next.final_content });
   });
 
   app.post("/api/resume/highlight/save", (req, res) => {
     const parsed = resumeHighlightSaveSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!parsed.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "highlight_save", reason: "invalid_params" }));
     const out = resumePipeline.saveHighlightContent(parsed.data.highlight_id, parsed.data.final_content);
     if (!out.ok) {
       if (out.reason === "not_found" || out.reason === "deleted") {
-        return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
+        return sendErr(res, 404, ApiCode.NOT_FOUND, "not_found", buildErrorContext({ stage: "highlight_save", reason: "not_found", highlight_id: parsed.data.highlight_id }));
       }
       if (out.reason === "invalid_content") {
-        return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+        return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "highlight_save", reason: "invalid_params", highlight_id: parsed.data.highlight_id }));
       }
-      return res.status(400).json(errBody(ApiCode.GENERATION_FAILED, "evidence_incomplete"));
+      return sendErr(res, 400, ApiCode.GENERATION_FAILED, "evidence_incomplete", buildErrorContext({ stage: "highlight_save", reason: "evidence_incomplete", highlight_id: parsed.data.highlight_id }));
     }
-    return res.json(
-      okBody({
-        highlight_id: out.highlight.highlight_id,
-        final_content: out.highlight.final_content,
-        original_content: out.highlight.original_content,
-        is_edited: out.highlight.is_edited
-      })
-    );
+    return sendOk(res, {
+      highlight_id: out.highlight.highlight_id,
+      final_content: out.highlight.final_content,
+      original_content: out.highlight.original_content,
+      is_edited: out.highlight.is_edited
+    });
   });
 
   app.post("/api/resume/highlight/delete", (req, res) => {
     const parsed = resumeHighlightDeleteSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    if (!parsed.success) return sendErr(res, 400, ApiCode.INVALID_PARAMS, "invalid_params", buildErrorContext({ stage: "highlight_delete", reason: "invalid_params" }));
     const out = resumePipeline.softDeleteHighlight(parsed.data.highlight_id);
     if (!out.ok) {
-      if (out.reason === "not_found") return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
-      return res.json(
-        okBody({
-          highlight_id: parsed.data.highlight_id,
-          status: "deleted" as const,
-          idempotent: true
-        })
-      );
+      if (out.reason === "not_found") return sendErr(res, 404, ApiCode.NOT_FOUND, "not_found", buildErrorContext({ stage: "highlight_delete", reason: "not_found", highlight_id: parsed.data.highlight_id }));
+      return sendOk(res, { highlight_id: parsed.data.highlight_id, status: "deleted" as const, idempotent: true });
     }
-    return res.json(
-      okBody({
-        highlight_id: out.highlight.highlight_id,
-        status: "deleted" as const,
-        idempotent: false
-      })
-    );
+    return sendOk(res, { highlight_id: out.highlight.highlight_id, status: "deleted" as const, idempotent: false });
   });
 
   app.get("/api/storage/snapshot", (_req, res) => {
     const snapshot = repo.snapshot();
-    return res.json(okBody(snapshot));
+    return sendOk(res, snapshot);
   });
 
   return app;

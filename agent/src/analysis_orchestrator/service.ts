@@ -12,6 +12,7 @@ import { Repository } from "../storage/repository.js";
 import type { AnalysisTask, DocumentRef, Platform, Session, SessionStatus } from "../types.js";
 import { makeId } from "../utils/id.js";
 import { AuthService } from "../auth_service/service.js";
+import { logEvent } from "../http/logger.js";
 
 export class AnalysisOrchestrator {
   constructor(
@@ -62,7 +63,7 @@ export class AnalysisOrchestrator {
    * Creates a task and awaits document-pull completion before returning.
    * Callers (e.g. /api/analysis/start) should await this.
    */
-  async startTask(sessionId: string, userId: string): Promise<AnalysisTask> {
+  async startTask(sessionId: string, userId: string, trace?: { request_id: string }): Promise<AnalysisTask> {
     const now = new Date().toISOString();
     const task: AnalysisTask = {
       task_id: makeId("task"),
@@ -73,7 +74,7 @@ export class AnalysisOrchestrator {
       updated_at: now
     };
     this.repo.mutate((data) => data.analysisTasks.push(task));
-    await this.runTask(task.task_id, userId);
+    await this.runTask(task.task_id, userId, trace);
     // Return persisted task with updated status
     return this.repo.snapshot().analysisTasks.find((t) => t.task_id === task.task_id) ?? task;
   }
@@ -106,7 +107,7 @@ export class AnalysisOrchestrator {
     };
   }
 
-  private async runTask(taskId: string, userId: string): Promise<void> {
+  private async runTask(taskId: string, userId: string, trace?: { request_id: string }): Promise<void> {
     this.repo.mutate((data) => {
       const task = data.analysisTasks.find((item) => item.task_id === taskId);
       if (task) task.status = "running";
@@ -131,6 +132,13 @@ export class AnalysisOrchestrator {
 
         const token = this.authService.getAccessToken(doc.platform, userId, task.session_id);
         if (!token) {
+          logEvent("warn", "document.fetch.skipped", {
+            request_id: trace?.request_id,
+            session_id: task.session_id,
+            doc_id: doc.doc_id,
+            platform: doc.platform,
+            reason: "auth_required"
+          });
           this.markDoc(doc.doc_id, "auth_required", "auth_required");
           failures.push(`${doc.doc_id}:auth_required`);
           continue;
@@ -139,6 +147,12 @@ export class AnalysisOrchestrator {
         // Adapters are now async; map known error reasons to appropriate doc status
         let normalized: Awaited<ReturnType<FeishuAdapter["fetchDocument"]>>;
         try {
+          logEvent("info", "document.fetch.start", {
+            request_id: trace?.request_id,
+            session_id: task.session_id,
+            doc_id: doc.doc_id,
+            platform: doc.platform
+          });
           normalized = await (doc.platform === "feishu"
             ? this.feishuAdapter.fetchDocument(doc, token)
             : this.yuqueAdapter.fetchDocument(doc, token));
@@ -150,11 +164,25 @@ export class AnalysisOrchestrator {
               : reason === "auth_required" || reason === "token_expired" || reason === "token_invalid"
                 ? "auth_required"
                 : "failed";
+          logEvent("warn", "document.fetch.failed", {
+            request_id: trace?.request_id,
+            session_id: task.session_id,
+            doc_id: doc.doc_id,
+            platform: doc.platform,
+            reason
+          });
           this.markDoc(doc.doc_id, docStatus, reason);
           failures.push(`${doc.doc_id}:${reason}`);
           continue;
         }
 
+        logEvent("info", "document.fetch.success", {
+          request_id: trace?.request_id,
+          session_id: task.session_id,
+          doc_id: doc.doc_id,
+          platform: doc.platform,
+          normalized_blocks: normalized.blocks?.length
+        });
         this.markDoc(doc.doc_id, "parsing");
         const normalizedDoc = documentNormalizer(normalized);
         const cleaned = contentCleaner(normalizedDoc.content_text);
