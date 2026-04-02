@@ -117,3 +117,5 @@
 - `README.md` — 功能范围、API 表、本地与 CI 验证命令。
 - `openspec/changes/private-doc-resume-highlights-mvp/specs/http-api-response.md` — HTTP 数字契约。
 - `docs/master-spec-private-doc-resume-highlights.md` — Master Spec（若与实现有扩展差异，以 `http-api-response.md` 标注为准）。
+- `docs/frontend-integration.md` — 前端接入字段与状态语义。
+- `docs/manual-validation-stage5.md` — Stage 5 真实接入手工验收步骤（飞书/语雀/失败场景/request_id 排障）。
