@@ -1,6 +1,7 @@
 /**
  * Orchestrates session lifecycle and document pipeline up to Chunk persistence.
- * Document body comes from platform adapters (mock fetch in stage 1); phase 2 consumes Chunk → Fact without relying on mock HTTP semantics.
+ * Adapters are now async (real HTTP in real mode); `runTask` / `startTask` are async accordingly.
+ * `POST /api/analysis/start` awaits completion so callers can depend on parsed state immediately.
  */
 import { chunker } from "../document_pipeline/chunker.js";
 import { contentCleaner } from "../document_pipeline/cleaner.js";
@@ -57,7 +58,11 @@ export class AnalysisOrchestrator {
     return refs;
   }
 
-  startTask(sessionId: string, userId: string): AnalysisTask {
+  /**
+   * Creates a task and awaits document-pull completion before returning.
+   * Callers (e.g. /api/analysis/start) should await this.
+   */
+  async startTask(sessionId: string, userId: string): Promise<AnalysisTask> {
     const now = new Date().toISOString();
     const task: AnalysisTask = {
       task_id: makeId("task"),
@@ -68,8 +73,9 @@ export class AnalysisOrchestrator {
       updated_at: now
     };
     this.repo.mutate((data) => data.analysisTasks.push(task));
-    this.runTask(task.task_id, userId);
-    return task;
+    await this.runTask(task.task_id, userId);
+    // Return persisted task with updated status
+    return this.repo.snapshot().analysisTasks.find((t) => t.task_id === task.task_id) ?? task;
   }
 
   getTask(taskId: string): AnalysisTask | undefined {
@@ -100,7 +106,7 @@ export class AnalysisOrchestrator {
     };
   }
 
-  private runTask(taskId: string, userId: string): void {
+  private async runTask(taskId: string, userId: string): Promise<void> {
     this.repo.mutate((data) => {
       const task = data.analysisTasks.find((item) => item.task_id === taskId);
       if (task) task.status = "running";
@@ -129,13 +135,34 @@ export class AnalysisOrchestrator {
           failures.push(`${doc.doc_id}:auth_required`);
           continue;
         }
-        const normalized = doc.platform === "feishu"
-          ? this.feishuAdapter.fetchDocument(doc, token)
-          : this.yuqueAdapter.fetchDocument(doc, token);
+
+        // Adapters are now async; map known error reasons to appropriate doc status
+        let normalized: Awaited<ReturnType<FeishuAdapter["fetchDocument"]>>;
+        try {
+          normalized = await (doc.platform === "feishu"
+            ? this.feishuAdapter.fetchDocument(doc, token)
+            : this.yuqueAdapter.fetchDocument(doc, token));
+        } catch (err) {
+          const reason: string = (err as { reason?: string }).reason ?? "fetch_failed";
+          const docStatus: DocumentRef["status"] =
+            reason === "access_denied" || reason === "token_revoked"
+              ? "access_denied"
+              : reason === "auth_required" || reason === "token_expired" || reason === "token_invalid"
+                ? "auth_required"
+                : "failed";
+          this.markDoc(doc.doc_id, docStatus, reason);
+          failures.push(`${doc.doc_id}:${reason}`);
+          continue;
+        }
+
         this.markDoc(doc.doc_id, "parsing");
         const normalizedDoc = documentNormalizer(normalized);
         const cleaned = contentCleaner(normalizedDoc.content_text);
-        const normalizedCleaned = { ...normalizedDoc, content_text: cleaned, blocks: cleaned.split("\n").filter(Boolean) };
+        const normalizedCleaned = {
+          ...normalizedDoc,
+          content_text: cleaned,
+          blocks: cleaned.split("\n").filter(Boolean)
+        };
         const chunks = chunker(normalizedCleaned);
         this.repo.mutate((data) => {
           data.normalizedDocuments.push(normalizedCleaned);

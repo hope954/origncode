@@ -10,8 +10,9 @@ Node/Express service under **`agent/`**: session orchestration, document intake,
 | **Stage 1.5** | Done | Contract baseline: numeric HTTP `code` (Master Spec §15.x), path fixes, tests; mock adapters clearly bounded. |
 | **Stage 2** | Done | **Fact / Experience / Highlight / Evidence** backend: `Chunk → Fact → Experience → Highlight`, `partial_success`, analyze/result/evidence/rewrite APIs. |
 | **Stage 3** | Done | **结果编辑 / 软删 / 会话清理**：`POST /api/resume/highlight/save`、`delete`，`POST /api/session/clear`；软删亮点、级联清理会话数据；**不**在业务逻辑中耦合平台 mock。 |
+| **Stage 4** | Done | **真实平台接入替换**：飞书真实 OAuth / token exchange / refresh；语雀真实 token 校验探测；两个 adapter 均支持真实 HTTP 文档拉取 + `NormalizedDocument` 映射；配置门控（`FEISHU_APP_ID` / `YUQUE_LIVE_FETCH`），CI 无需真实凭据。 |
 
-Third-party **OAuth token exchange** and **live document APIs** remain **mocked or stubbed** (see [Mock vs real integration](#mock-vs-real-integration)). Pipeline logic does not depend on real Feishu/Yuque HTTP.
+Platform integration is **configuration-gated**: when env vars are unset, adapters and auth use mock paths for CI/dev; when configured, real HTTP calls are made. (see [Mock vs real integration](#mock-vs-real-integration)).
 
 ### Highlights (Stage 3)
 
@@ -42,6 +43,17 @@ Third-party **OAuth token exchange** and **live document APIs** remain **mocked 
 - Session/task states including **`partial_success`** when some docs fail but highlights are still produced.
 - Evidence API exposes fact metadata (e.g. **`extraction_tier`**) for traceability.
 
+### Stage 4 — real platform integration
+
+- **飞书 OAuth** (`handleFeishuCallback`): 使用 Feishu `app_access_token` 交换 `auth_code` → `user_access_token` + `refresh_token`；`refreshFeishuToken` 调真实 refresh 端点。
+- **飞书文档** (`FeishuAdapter.fetchDocument`): GET `/open-apis/docx/v1/documents/{id}/raw_content`；解析 docx/docs URL；映射 `title`/`blocks`/`content_text`。
+- **语雀 token** (`verifyYuqueToken`): `YUQUE_LIVE_VERIFY=1` 时向 `GET /api/v2/user` 发探测请求；否则仅结构校验。
+- **语雀文档** (`YuqueAdapter.fetchDocument`): `YUQUE_LIVE_FETCH=1` 时 GET `/api/v2/repos/{ns}/{book}/docs/{slug}`；解析 yuque.com URL；映射 `NormalizedDocument`。
+- **错误语义**: 平台 401/403/500 统一映射到现有 `ApiCode`（`auth_required`/`access_denied`/`token_expired`/`token_invalid`/`token_revoked`/`fetch_failed`）。
+- **配置门控**: CI 不设 `FEISHU_APP_ID` → mock 路径；生产部署设齐所有 env vars → 真实路径。
+- **`analysis_orchestrator` async cascade**: `startTask`/`runTask` 改为 async，等待 adapter 完成后再返回（客户端无需轮询即可立即 analyze）。
+- 新增测试：**`tests/platform_integration.test.ts`**（14 用例，`vi.stubGlobal('fetch', ...)` 驱动）。
+
 ### Stage 3 — edit, delete, session lifecycle
 
 - `POST /api/resume/highlight/save` — persist edited `final_content`, `is_edited`, `status: saved`.
@@ -53,31 +65,34 @@ Third-party **OAuth token exchange** and **live document APIs** remain **mocked 
 
 ## Not implemented yet
 
-- **Production** Feishu/Yuque OAuth and document HTTP (current: mocks; see table below).
 - Dedicated **web UI** for evidence chains / highlight editing (APIs exist; no shipped frontend in this repo).
 - OpenSpec task **7.4**（结果页 evidence 展示交互）— 前端范围，本仓库仅提供 API。
 - **Multi-tenant DB / S3** 等替代 JSON 文件存储（需替换 `Repository` 实现）。
+- Feishu **Wiki / Bitable** URL 格式支持（当前仅 `/docx/` + `/docs/` 路径）。
+- 语雀 **OAuth** 接入（当前仍为手动 token，符合 Master Spec MVP 要求）。
 
 ---
 
 ## Mock vs real integration
 
-| Area | Current behavior | To reach “real” |
-|------|------------------|-----------------|
-| Feishu token exchange | **`auth_service` synthesizes** tokens from `auth_code`** — not Feishu HTTP | `app_id` / `app_secret` + official token endpoints |
-| Feishu document fetch | **`FeishuAdapter.fetchDocument`** returns fixed markdown-like text | Docs/Bitable APIs with real `user_access_token` |
-| Yuque document fetch | **`YuqueAdapter.fetchDocument`** returns fixed text | Yuque Open API with user token |
-| Yuque token “verify” | Prefix / length checks only — **not** live API | e.g. lightweight “who am I” probe |
+Stage 4 已实现真实接入，行为通过 **配置门控** 切换，CI 无需真实凭据：
+
+| Area | Real mode gate | Mock fallback (CI/dev) |
+|------|----------------|------------------------|
+| Feishu token exchange | `FEISHU_APP_ID` + `FEISHU_APP_SECRET` | Synthesized `feishu_at_...` token |
+| Feishu document fetch | `FEISHU_APP_ID` set | Fixed markdown-like text |
+| Yuque token verify (live probe) | `YUQUE_LIVE_VERIFY=1` | Structural prefix + length check |
+| Yuque document fetch | `YUQUE_LIVE_FETCH=1` | Fixed text |
 
 **Adapters remain pluggable**: resume **save/delete/clear** 只读写仓库内结构化数据，**无**飞书/语雀分支。
 
-### 真实平台接入待替换点（checklist）
+### 真实平台接入状态（Stage 4 completed）
 
-1. **`auth_service.handleFeishuCallback`** — POST Feishu OAuth token API; store real tokens + expiry.
-2. **`auth_service.refreshFeishuToken`** — refresh endpoint; handle expiry/revoke.
-3. **`auth_service.saveYuqueToken` / `verifyYuqueToken`** — optional live validation before save.
-4. **`FeishuAdapter.fetchDocument`** — resolve URL → API calls for body/export.
-5. **`YuqueAdapter.fetchDocument`** — resolve repo/slug; GET document body.
+1. `auth_service.handleFeishuCallback` — ✅ 真实 OIDC code → token exchange；`FEISHU_APP_ID` 门控。
+2. `auth_service.refreshFeishuToken` — ✅ 真实 refresh endpoint；`FEISHU_APP_ID` 门控。
+3. `auth_service.verifyYuqueToken` — ✅ 可选真实 GET `/api/v2/user` 探测；`YUQUE_LIVE_VERIFY=1` 门控。
+4. `FeishuAdapter.fetchDocument` — ✅ 解析 docx/docs URL，调真实 raw_content API；`FEISHU_APP_ID` 门控。
+5. `YuqueAdapter.fetchDocument` — ✅ 解析 yuque.com URL，调真实文档 API；`YUQUE_LIVE_FETCH=1` 门控。
 
 ---
 

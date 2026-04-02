@@ -4,6 +4,7 @@
  * - OAuth, refresh, Yuque token CRUD: `auth_service`.
  *
  * 响应体：`code` 为数字，与 Master Spec §15.1 / §15.2 及 `openspec/.../http-api-response.md` 一致。
+ * Routes calling async auth/adapter operations are async; all other routes remain sync.
  */
 import express from "express";
 import { z } from "zod";
@@ -98,14 +99,22 @@ export function createApp() {
     return res.json(okBody({ auth_url: authService.getAuthUrl(userId, sessionId) }));
   });
 
-  app.post("/api/auth/callback", (req, res) => {
+  // async: handleFeishuCallback makes real HTTP when FEISHU_APP_ID is configured
+  app.post("/api/auth/callback", async (req, res) => {
     const body = z.object({ user_id: z.string(), session_id: z.string(), auth_code: z.string() }).safeParse(req.body);
     if (!body.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
-    const auth = authService.handleFeishuCallback(body.data.user_id, body.data.session_id, body.data.auth_code);
-    return res.json(okBody({ platform: auth.platform, auth_status: auth.auth_status }));
+    try {
+      const auth = await authService.handleFeishuCallback(body.data.user_id, body.data.session_id, body.data.auth_code);
+      return res.json(okBody({ platform: auth.platform, auth_status: auth.auth_status }));
+    } catch (err) {
+      const reason = (err as { reason?: string }).reason ?? "auth_required";
+      if (reason === "token_invalid") return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_invalid"));
+      return res.status(400).json(errBody(ApiCode.AUTH_REQUIRED, "auth_required"));
+    }
   });
 
-  app.post("/api/auth/refresh", (req, res) => {
+  // async: refreshFeishuToken makes real HTTP when FEISHU_APP_ID is configured
+  app.post("/api/auth/refresh", async (req, res) => {
     const body = z
       .object({
         platform: z.enum(["feishu", "yuque"]),
@@ -122,22 +131,31 @@ export function createApp() {
         })
       );
     }
-    const refreshed = authService.refreshFeishuToken(body.data.user_id, body.data.session_id);
-    if (!refreshed) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_invalid"));
-    return res.json(okBody({ platform: "feishu", auth_status: refreshed.auth_status }));
+    try {
+      const refreshed = await authService.refreshFeishuToken(body.data.user_id, body.data.session_id);
+      if (!refreshed) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_invalid"));
+      return res.json(okBody({ platform: "feishu", auth_status: refreshed.auth_status }));
+    } catch (err) {
+      const reason = (err as { reason?: string }).reason ?? "token_expired";
+      if (reason === "token_revoked") return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_revoked"));
+      return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_expired"));
+    }
   });
 
-  app.post("/api/auth/yuque/token/verify", (req, res) => {
+  // async: verifyYuqueToken may probe real API when YUQUE_LIVE_VERIFY=1
+  app.post("/api/auth/yuque/token/verify", async (req, res) => {
     const body = z.object({ token: z.string() }).safeParse(req.body);
     if (!body.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
-    return res.json(okBody({ valid: authService.verifyYuqueToken(body.data.token) }));
+    const valid = await authService.verifyYuqueToken(body.data.token);
+    return res.json(okBody({ valid }));
   });
 
-  app.post("/api/auth/yuque/token/save", (req, res) => {
+  // async: saveYuqueToken awaits verifyYuqueToken
+  app.post("/api/auth/yuque/token/save", async (req, res) => {
     const body = z.object({ user_id: z.string(), session_id: z.string().optional(), token: z.string() }).safeParse(req.body);
     if (!body.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
     try {
-      const auth = authService.saveYuqueToken(body.data);
+      const auth = await authService.saveYuqueToken(body.data);
       return res.json(okBody({ platform: auth.platform, auth_status: auth.auth_status }));
     } catch {
       return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "token_invalid"));
@@ -164,10 +182,11 @@ export function createApp() {
     return res.json(okBody(docs));
   });
 
-  app.post("/api/analysis/start", (req, res) => {
+  // async: orchestrator.startTask awaits adapter.fetchDocument (real HTTP when configured)
+  app.post("/api/analysis/start", async (req, res) => {
     const parsed = analysisSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
-    const task = orchestrator.startTask(parsed.data.session_id, parsed.data.user_id);
+    const task = await orchestrator.startTask(parsed.data.session_id, parsed.data.user_id);
     return res.json(okBody({ task_id: task.task_id }));
   });
 

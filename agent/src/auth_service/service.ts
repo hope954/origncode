@@ -1,12 +1,18 @@
 /**
  * Auth service — OAuth / token lifecycle and Yuque manual token.
  *
- * MOCK FEISHU EXCHANGE: `handleFeishuCallback` and `refreshFeishuToken` synthesize tokens
- * from auth_code / refresh material. Real implementation must call Feishu token endpoints
- * and map responses (see README “真实平台接入待替换点”). Phase 2 must not assume these mocks
- * are real API semantics.
+ * FEISHU EXCHANGE:
+ *   - When FEISHU_APP_ID + FEISHU_APP_SECRET are configured, real Feishu HTTP APIs are used.
+ *   - When those env vars are absent (dev / CI), a mock token path synthesises tokens
+ *     from auth_code/refresh material. Real implementation uses Feishu OIDC endpoints.
+ *
+ * YUQUE VERIFY:
+ *   - When YUQUE_BASE_URL is reachable, real token probe is performed (GET /api/v2/user).
+ *   - Dev/CI fallback: prefix + length check only.
+ *
+ * Phase 2+ must not assume mock semantics for real deployments.
  */
-import { config } from "../config.js";
+import { config, feishuConfigured } from "../config.js";
 import { Repository } from "../storage/repository.js";
 import type { Platform, PlatformAuth, PlatformAuthStatus } from "../types.js";
 import { decryptToken, encryptToken } from "../utils/crypto.js";
@@ -19,15 +25,119 @@ interface SaveTokenInput {
   expire_at?: string;
 }
 
+// ─── Feishu HTTP helpers ────────────────────────────────────────────────────
+
+async function getFeishuAppAccessToken(): Promise<string> {
+  const url = `${config.feishu.baseUrl}/open-apis/auth/v3/app_access_token/internal`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ app_id: config.feishu.appId, app_secret: config.feishu.appSecret })
+  });
+  const json = (await res.json()) as { code?: number; app_access_token?: string; msg?: string };
+  if (!res.ok || json.code !== 0 || !json.app_access_token) {
+    throw Object.assign(new Error("feishu_app_token_failed"), { reason: "auth_required" });
+  }
+  return json.app_access_token;
+}
+
+interface FeishuUserTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  refresh_expires_in?: number;
+}
+
+async function exchangeFeishuCode(appToken: string, authCode: string): Promise<FeishuUserTokens> {
+  const url = `${config.feishu.baseUrl}/open-apis/authen/v1/oidc/access_token`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${appToken}`
+    },
+    body: JSON.stringify({ grant_type: "authorization_code", code: authCode })
+  });
+  const json = (await res.json()) as { code?: number; data?: FeishuUserTokens; msg?: string };
+  if (!res.ok || json.code !== 0 || !json.data?.access_token) {
+    const msg = (json.msg ?? "").toLowerCase();
+    if (msg.includes("invalid") || msg.includes("code") || msg.includes("expired")) {
+      throw Object.assign(new Error("token_invalid"), { reason: "token_invalid" });
+    }
+    throw Object.assign(new Error("auth_required"), { reason: "auth_required" });
+  }
+  return json.data;
+}
+
+async function refreshFeishuUserToken(appToken: string, refreshToken: string): Promise<FeishuUserTokens> {
+  const url = `${config.feishu.baseUrl}/open-apis/authen/v1/oidc/refresh_access_token`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${appToken}`
+    },
+    body: JSON.stringify({ grant_type: "refresh_token", refresh_token: refreshToken })
+  });
+  const json = (await res.json()) as { code?: number; data?: FeishuUserTokens; msg?: string };
+  if (!res.ok || json.code !== 0 || !json.data?.access_token) {
+    const msg = json.msg ?? "";
+    if (msg.includes("revoked") || msg.includes("invalid")) {
+      throw Object.assign(new Error("token_revoked"), { reason: "token_revoked" });
+    }
+    throw Object.assign(new Error("token_expired"), { reason: "token_expired" });
+  }
+  return json.data;
+}
+
+// ─── Yuque HTTP helpers ─────────────────────────────────────────────────────
+
+async function probeYuqueToken(token: string): Promise<boolean> {
+  const url = `${config.yuque.baseUrl}/api/v2/user`;
+  try {
+    const res = await fetch(url, {
+      headers: { "X-Auth-Token": token, Accept: "application/json" }
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ─── AuthService ─────────────────────────────────────────────────────────────
+
 export class AuthService {
   constructor(private readonly repo: Repository) {}
 
   getAuthUrl(userId: string, sessionId: string): string {
     const state = encodeURIComponent(`${userId}:${sessionId}`);
+    if (feishuConfigured()) {
+      const params = new URLSearchParams({
+        app_id: config.feishu.appId,
+        redirect_uri: config.feishu.redirectUri,
+        state
+      });
+      return `${config.feishu.baseUrl}/open-apis/authen/v1/index?${params}`;
+    }
     return `https://open.feishu.cn/open-apis/authen/v1/index?state=${state}`;
   }
 
-  handleFeishuCallback(userId: string, sessionId: string, authCode: string): PlatformAuth {
+  async handleFeishuCallback(userId: string, sessionId: string, authCode: string): Promise<PlatformAuth> {
+    if (feishuConfigured()) {
+      const appToken = await getFeishuAppAccessToken();
+      const tokens = await exchangeFeishuCode(appToken, authCode);
+      return this.savePlatformAuth(
+        "feishu",
+        {
+          user_id: userId,
+          session_id: sessionId,
+          token: tokens.access_token,
+          expire_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+        },
+        tokens.refresh_token
+      );
+    }
+    // Mock fallback (dev / CI without FEISHU_APP_ID)
     const accessToken = `feishu_at_${authCode}_${Date.now()}`;
     const refreshToken = `feishu_rt_${authCode}_${Date.now()}`;
     return this.savePlatformAuth("feishu", {
@@ -38,10 +148,25 @@ export class AuthService {
     }, refreshToken);
   }
 
-  refreshFeishuToken(userId: string, sessionId?: string): PlatformAuth | undefined {
+  async refreshFeishuToken(userId: string, sessionId?: string): Promise<PlatformAuth | undefined> {
     const auth = this.findAuth("feishu", userId, sessionId);
     if (!auth?.refresh_token_encrypted) return undefined;
     const refreshToken = decryptToken(auth.refresh_token_encrypted, config.tokenEncryptionKey);
+    if (feishuConfigured()) {
+      const appToken = await getFeishuAppAccessToken();
+      const tokens = await refreshFeishuUserToken(appToken, refreshToken);
+      return this.savePlatformAuth(
+        "feishu",
+        {
+          user_id: userId,
+          session_id: sessionId,
+          token: tokens.access_token,
+          expire_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+        },
+        tokens.refresh_token
+      );
+    }
+    // Mock fallback
     const newToken = `feishu_at_refresh_${refreshToken.slice(0, 10)}_${Date.now()}`;
     return this.savePlatformAuth("feishu", {
       user_id: userId,
@@ -51,14 +176,31 @@ export class AuthService {
     }, refreshToken);
   }
 
-  verifyYuqueToken(token: string): boolean {
+  /**
+   * Synchronous structural check (prefix + length) — always available.
+   * Use `verifyYuqueTokenLive` for live API probe (async).
+   */
+  verifyYuqueTokenStructure(token: string): boolean {
     return token.startsWith("yq_") && token.length >= 16;
   }
 
-  saveYuqueToken(input: SaveTokenInput): PlatformAuth {
-    if (!this.verifyYuqueToken(input.token)) {
-      throw new Error("token_invalid");
+  /**
+   * Full verification: structural check first, then optional live API probe.
+   * When YUQUE_BASE_URL is the default, performs a real GET /api/v2/user.
+   * CI / tests that don't set YUQUE_BASE_URL skip the live probe.
+   */
+  async verifyYuqueToken(token: string): Promise<boolean> {
+    if (!this.verifyYuqueTokenStructure(token)) return false;
+    const probeEnabled = Boolean(process.env.YUQUE_LIVE_VERIFY === "1");
+    if (probeEnabled) {
+      return probeYuqueToken(token);
     }
+    return true;
+  }
+
+  async saveYuqueToken(input: SaveTokenInput): Promise<PlatformAuth> {
+    const valid = await this.verifyYuqueToken(input.token);
+    if (!valid) throw new Error("token_invalid");
     return this.savePlatformAuth("yuque", input);
   }
 
@@ -66,7 +208,13 @@ export class AuthService {
     this.repo.mutate((data) => {
       data.platformAuths = data.platformAuths.map((item) => {
         if (item.platform === "yuque" && item.user_id === userId && (!sessionId || item.session_id === sessionId)) {
-          return { ...item, auth_status: "revoked", access_token_encrypted: undefined, token_expire_at: undefined, updated_at: new Date().toISOString() };
+          return {
+            ...item,
+            auth_status: "revoked",
+            access_token_encrypted: undefined,
+            token_expire_at: undefined,
+            updated_at: new Date().toISOString()
+          };
         }
         return item;
       });

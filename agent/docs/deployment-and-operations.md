@@ -1,6 +1,6 @@
 # 私有化部署与运维（Agent 后端）
 
-本文档与 `README.md`、OpenSpec `tasks.md` 中「部署 / 审计 / 发布门禁」条目对应，描述 **Stage 3 完成后** 的运行方式与检查清单。
+本文档与 `README.md`、OpenSpec `tasks.md` 中「部署 / 审计 / 发布门禁」条目对应，描述 **Stage 4 完成后** 的运行方式与检查清单。
 
 ---
 
@@ -21,19 +21,22 @@
 | `TOKEN_ENCRYPTION_KEY` | 生产建议 | 用于 `access_token` / `refresh_token` 对称加密；需与 `.env.example` 说明一致（长度/编码要求）。缺失时开发环境可能使用占位，**不得用于生产**。 |
 | `PORT` | 否 | HTTP 监听端口（若 `server.ts` 暴露）。 |
 
-### 第四阶段真实接入新增配置（规划中，当前代码默认未消费）
+### 第四阶段真实接入配置（Stage 4 已实现，配置门控）
 
-| 变量 | 计划用途 |
-|------|----------|
-| `FEISHU_APP_ID` | 飞书 OAuth `auth_code -> user_access_token` 交换时的客户端标识 |
-| `FEISHU_APP_SECRET` | 飞书 OAuth / refresh 调用所需密钥，必须仅后端持有 |
-| `FEISHU_REDIRECT_URI` | 飞书回调地址；需与飞书应用配置保持一致 |
-| `FEISHU_BASE_URL` | 飞书 Open API 基础地址；默认官方域名，私有区域或网关代理场景可覆盖 |
-| `YUQUE_BASE_URL` | 语雀 Open API 基础地址；用于 token 校验与文档拉取 |
+| 变量 | 门控对象 | 默认值 |
+|------|----------|--------|
+| `FEISHU_APP_ID` | 飞书 OAuth token exchange / refresh / 文档拉取（real 路径）| 空 → mock fallback |
+| `FEISHU_APP_SECRET` | 飞书 app_access_token 获取 | 空 → mock fallback |
+| `FEISHU_REDIRECT_URI` | 飞书 OAuth 回调地址；需与飞书应用配置保持一致 | — |
+| `FEISHU_BASE_URL` | 飞书 Open API 基础地址；私有区域或代理场景可覆盖 | `https://open.feishu.cn` |
+| `YUQUE_BASE_URL` | 语雀 Open API 基础地址 | `https://www.yuque.com` |
+| `YUQUE_LIVE_VERIFY` | 设为 `1` 启用真实 GET `/api/v2/user` token 探测 | 不设 → 仅结构校验 |
+| `YUQUE_LIVE_FETCH` | 设为 `1` 启用真实 YuqueAdapter 文档拉取 | 不设 → mock 文本 |
 
 说明：
-- `TOKEN_ENCRYPTION_KEY` 在第四阶段继续沿用，用于加密保存 **飞书 access/refresh token** 与 **语雀 access token**。
-- 上述第四阶段变量应先写入 `.env.example` 与部署文档，再在下一轮代码替换时接入 `src/config.ts` / `auth_service` / `platform_adapters`。
+- `TOKEN_ENCRYPTION_KEY` 继续用于加密保存 **飞书 access/refresh token** 与 **语雀 access token**，Stage 4 已验证。
+- CI 不设 `FEISHU_APP_ID` / `YUQUE_LIVE_FETCH`，走 mock 路径，保持 green 无需真实凭据。
+- `FEISHU_APP_ID` 缺失时，`getAuthUrl` 仍返回有效 URL（无 app_id 参数），上层逻辑不会因此中断。
 
 复制 `.env.example` → `.env` 并按环境填写。勿将 `.env` 提交到版本库。
 
@@ -47,12 +50,12 @@
 
 ---
 
-## 4. Mock 与真实平台替换
+## 4. Mock 与真实平台替换（Stage 4 已完成）
 
-- **认证**：`auth_service` 负责 OAuth / token；**当前**飞书 token 为本地合成字符串，语雀为前缀校验 + 保存。
-- **文档**：`FeishuAdapter` / `YuqueAdapter` 返回 **固定文本**；解析后进入统一 `NormalizedDocument` 与 chunk 管线。
-- **替换步骤**：见根目录 `README.md`「真实平台接入待替换点」清单；**不得**在 `resume` 保存/删除/会话清理逻辑中插入平台特判 — 第三阶段路由与 `session_lifecycle` 仅依赖仓库内结构化数据。
-- **测试策略**：CI 不直接访问真实飞书 / 语雀；第四阶段推荐使用 **协议层 HTTP mock + fixture JSON + adapter 映射测试**，手工验证单独执行。
+- **认证**：`auth_service` 负责 OAuth / token；飞书 token 在 `FEISHU_APP_ID` 配置后走真实 OIDC 交换，否则合成。语雀为前缀校验 + 可选 live probe。
+- **文档**：`FeishuAdapter` / `YuqueAdapter` 在配置门控激活时调真实 HTTP API，返回内容映射为 `NormalizedDocument`；未配置时返回固定文本，供 CI 与开发使用。
+- **上层不变**：resume 保存/删除/会话清理逻辑与平台无关，只操作 Repository 内结构化数据，**不受**接入替换影响。
+- **测试策略**：CI 走 mock 路径，所有单测通过 `vi.stubGlobal('fetch', ...)` 模拟 HTTP 响应，不访问外网；真实联调手工执行（见下文验证步骤）。
 
 ---
 
