@@ -17,6 +17,7 @@ import { Repository } from "../storage/repository.js";
 import type { Platform, PlatformAuth, PlatformAuthStatus } from "../types.js";
 import { decryptToken, encryptToken } from "../utils/crypto.js";
 import { makeId } from "../utils/id.js";
+import { fetchJson } from "../http/fetch_client.js";
 
 interface SaveTokenInput {
   user_id: string;
@@ -27,15 +28,36 @@ interface SaveTokenInput {
 
 // ─── Feishu HTTP helpers ────────────────────────────────────────────────────
 
+function feishuEnv(): { appId: string; appSecret: string; redirectUri: string; baseUrl: string } {
+  return {
+    appId: process.env.FEISHU_APP_ID ?? config.feishu.appId,
+    appSecret: process.env.FEISHU_APP_SECRET ?? config.feishu.appSecret,
+    redirectUri: process.env.FEISHU_REDIRECT_URI ?? config.feishu.redirectUri,
+    baseUrl: (process.env.FEISHU_BASE_URL ?? config.feishu.baseUrl).replace(/\/$/, "")
+  };
+}
+
 async function getFeishuAppAccessToken(): Promise<string> {
-  const url = `${config.feishu.baseUrl}/open-apis/auth/v3/app_access_token/internal`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ app_id: config.feishu.appId, app_secret: config.feishu.appSecret })
-  });
-  const json = (await res.json()) as { code?: number; app_access_token?: string; msg?: string };
-  if (!res.ok || json.code !== 0 || !json.app_access_token) {
+  const feishu = feishuEnv();
+  const url = `${feishu.baseUrl}/open-apis/auth/v3/app_access_token/internal`;
+  const r = await fetchJson(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ app_id: feishu.appId, app_secret: feishu.appSecret })
+    },
+    {
+      shouldRetry: ({ status, error }) => {
+        // retry only on transient network / 5xx / 429
+        if (error) return "retry";
+        if (status && (status === 429 || status >= 500)) return "retry";
+        return "no_retry";
+      }
+    }
+  );
+  const json = (r.json ?? {}) as { code?: number; app_access_token?: string; msg?: string };
+  if (!r.ok || json.code !== 0 || !json.app_access_token) {
     throw Object.assign(new Error("feishu_app_token_failed"), { reason: "auth_required" });
   }
   return json.app_access_token;
@@ -49,17 +71,28 @@ interface FeishuUserTokens {
 }
 
 async function exchangeFeishuCode(appToken: string, authCode: string): Promise<FeishuUserTokens> {
-  const url = `${config.feishu.baseUrl}/open-apis/authen/v1/oidc/access_token`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${appToken}`
+  const feishu = feishuEnv();
+  const url = `${feishu.baseUrl}/open-apis/authen/v1/oidc/access_token`;
+  const r = await fetchJson(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${appToken}`
+      },
+      body: JSON.stringify({ grant_type: "authorization_code", code: authCode })
     },
-    body: JSON.stringify({ grant_type: "authorization_code", code: authCode })
-  });
-  const json = (await res.json()) as { code?: number; data?: FeishuUserTokens; msg?: string };
-  if (!res.ok || json.code !== 0 || !json.data?.access_token) {
+    {
+      shouldRetry: ({ status, error }) => {
+        if (error) return "retry";
+        if (status && (status === 429 || status >= 500)) return "retry";
+        return "no_retry";
+      }
+    }
+  );
+  const json = (r.json ?? {}) as { code?: number; data?: FeishuUserTokens; msg?: string };
+  if (!r.ok || json.code !== 0 || !json.data?.access_token) {
     const msg = (json.msg ?? "").toLowerCase();
     if (msg.includes("invalid") || msg.includes("code") || msg.includes("expired")) {
       throw Object.assign(new Error("token_invalid"), { reason: "token_invalid" });
@@ -70,18 +103,29 @@ async function exchangeFeishuCode(appToken: string, authCode: string): Promise<F
 }
 
 async function refreshFeishuUserToken(appToken: string, refreshToken: string): Promise<FeishuUserTokens> {
-  const url = `${config.feishu.baseUrl}/open-apis/authen/v1/oidc/refresh_access_token`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${appToken}`
+  const feishu = feishuEnv();
+  const url = `${feishu.baseUrl}/open-apis/authen/v1/oidc/refresh_access_token`;
+  const r = await fetchJson(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${appToken}`
+      },
+      body: JSON.stringify({ grant_type: "refresh_token", refresh_token: refreshToken })
     },
-    body: JSON.stringify({ grant_type: "refresh_token", refresh_token: refreshToken })
-  });
-  const json = (await res.json()) as { code?: number; data?: FeishuUserTokens; msg?: string };
-  if (!res.ok || json.code !== 0 || !json.data?.access_token) {
-    const msg = json.msg ?? "";
+    {
+      shouldRetry: ({ status, error }) => {
+        if (error) return "retry";
+        if (status && (status === 429 || status >= 500)) return "retry";
+        return "no_retry";
+      }
+    }
+  );
+  const json = (r.json ?? {}) as { code?: number; data?: FeishuUserTokens; msg?: string };
+  if (!r.ok || json.code !== 0 || !json.data?.access_token) {
+    const msg = (json.msg ?? "").toLowerCase();
     if (msg.includes("revoked") || msg.includes("invalid")) {
       throw Object.assign(new Error("token_revoked"), { reason: "token_revoked" });
     }
@@ -95,10 +139,20 @@ async function refreshFeishuUserToken(appToken: string, refreshToken: string): P
 async function probeYuqueToken(token: string): Promise<boolean> {
   const url = `${config.yuque.baseUrl}/api/v2/user`;
   try {
-    const res = await fetch(url, {
-      headers: { "X-Auth-Token": token, Accept: "application/json" }
-    });
-    return res.ok;
+    const r = await fetchJson(
+      url,
+      {
+        headers: { "X-Auth-Token": token, Accept: "application/json" }
+      },
+      {
+        shouldRetry: ({ status, error }) => {
+          if (error) return "retry";
+          if (status && (status === 429 || status >= 500)) return "retry";
+          return "no_retry";
+        }
+      }
+    );
+    return r.ok;
   } catch {
     return false;
   }
@@ -112,12 +166,13 @@ export class AuthService {
   getAuthUrl(userId: string, sessionId: string): string {
     const state = encodeURIComponent(`${userId}:${sessionId}`);
     if (feishuConfigured()) {
+      const feishu = feishuEnv();
       const params = new URLSearchParams({
-        app_id: config.feishu.appId,
-        redirect_uri: config.feishu.redirectUri,
+        app_id: feishu.appId,
+        redirect_uri: feishu.redirectUri,
         state
       });
-      return `${config.feishu.baseUrl}/open-apis/authen/v1/index?${params}`;
+      return `${feishu.baseUrl}/open-apis/authen/v1/index?${params}`;
     }
     return `https://open.feishu.cn/open-apis/authen/v1/index?state=${state}`;
   }

@@ -7,6 +7,7 @@ function safeValue(value: unknown): unknown {
     // Avoid leaking tokens, long payloads, or document content.
     const s = value;
     if (s.includes("feishu_at_") || s.includes("feishu_rt_") || s.startsWith("yq_")) return "[REDACTED]";
+    if (s.startsWith("Bearer ")) return "[REDACTED]";
     if (s.length > 200) return `${s.slice(0, 200)}…[TRUNCATED]`;
     return s;
   }

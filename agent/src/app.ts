@@ -105,7 +105,8 @@ export function createApp() {
     errorContext?: Record<string, unknown>
   ) {
     const request_id = requestIdFrom(res);
-    const data = errorContext ? { error_context: errorContext } : undefined;
+    const ctx = errorContext ? { ...errorContext, request_id } : { request_id };
+    const data = { error_context: ctx };
     return res.status(httpStatus).json({ ...errBody(code as never, message, data), request_id });
   }
 

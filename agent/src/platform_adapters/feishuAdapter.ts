@@ -16,6 +16,7 @@
 import { config, feishuConfigured } from "../config.js";
 import type { DocumentRef, NormalizedDocument } from "../types.js";
 import { makeId } from "../utils/id.js";
+import { fetchJson } from "../http/fetch_client.js";
 
 // ─── URL helpers ─────────────────────────────────────────────────────────────
 
@@ -63,17 +64,21 @@ async function fetchDocxRawContent(
   const rawUrl = `${baseUrl}/open-apis/docx/v1/documents/${documentId}/raw_content`;
   const headers = { Authorization: `Bearer ${userAccessToken}`, Accept: "application/json" };
 
-  const [infoRes, rawRes] = await Promise.all([fetch(infoUrl, { headers }), fetch(rawUrl, { headers })]);
-  const infoJson = (await infoRes.json()) as FeishuDocInfoResp;
-  const rawJson = (await rawRes.json()) as FeishuRawContentResp;
+  const [infoR, rawR] = await Promise.all([
+    fetchJson(infoUrl, { headers }, { shouldRetry: ({ status, error }) => (error || (status && (status === 429 || status >= 500)) ? "retry" : "no_retry") }),
+    fetchJson(rawUrl, { headers }, { shouldRetry: ({ status, error }) => (error || (status && (status === 429 || status >= 500)) ? "retry" : "no_retry") })
+  ]);
 
-  if (rawRes.status === 403 || rawJson.code === 403100 || rawJson.code === 403001) {
+  const infoJson = (infoR.json ?? {}) as FeishuDocInfoResp;
+  const rawJson = (rawR.json ?? {}) as FeishuRawContentResp;
+
+  if (rawR.status === 403 || rawJson.code === 403100 || rawJson.code === 403001) {
     throw Object.assign(new Error("access_denied"), { reason: "access_denied" });
   }
-  if (rawRes.status === 401 || rawJson.code === 99991663 || rawJson.code === 99991664) {
+  if (rawR.status === 401 || rawJson.code === 99991663 || rawJson.code === 99991664) {
     throw Object.assign(new Error("token_expired"), { reason: "token_expired" });
   }
-  if (!rawRes.ok || rawJson.code !== 0) {
+  if (!rawR.ok || rawJson.code !== 0) {
     throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed" });
   }
 
@@ -82,6 +87,9 @@ async function fetchDocxRawContent(
     infoJson.data?.document?.document_id ??
     documentId;
   const content = rawJson.data?.content ?? "";
+  if (!content.trim()) {
+    throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed", detail: "empty_content" });
+  }
   return { title, content };
 }
 

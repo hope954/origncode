@@ -28,6 +28,7 @@
 import { config } from "../config.js";
 import type { DocumentRef, NormalizedDocument } from "../types.js";
 import { makeId } from "../utils/id.js";
+import { fetchJson } from "../http/fetch_client.js";
 
 // ─── URL helpers ─────────────────────────────────────────────────────────────
 
@@ -65,32 +66,45 @@ async function fetchYuqueDoc(
   baseUrl: string
 ): Promise<{ title: string; content: string }> {
   const url = `${baseUrl}/api/v2/repos/${namespace}/${book}/docs/${slug}`;
-  const res = await fetch(url, {
-    headers: {
-      "X-Auth-Token": token,
-      Accept: "application/json",
-      "User-Agent": "private-doc-resume-agent/1.0"
+  const r = await fetchJson(
+    url,
+    {
+      headers: {
+        "X-Auth-Token": token,
+        Accept: "application/json",
+        "User-Agent": "private-doc-resume-agent/1.0"
+      }
+    },
+    {
+      shouldRetry: ({ status, error }) => {
+        if (error) return "retry";
+        if (status && (status === 429 || status >= 500)) return "retry";
+        return "no_retry";
+      }
     }
-  });
+  );
 
-  if (res.status === 401 || res.status === 403) {
-    const json = (await res.json().catch(() => ({}))) as YuqueDocResp;
+  const json = (r.json ?? {}) as YuqueDocResp;
+  if (r.status === 401 || r.status === 403) {
     const msg = (json.message ?? "").toLowerCase();
-    if (res.status === 401 || msg.includes("token") || msg.includes("unauthorized")) {
+    if (r.status === 401 || msg.includes("token") || msg.includes("unauthorized")) {
       throw Object.assign(new Error("token_invalid"), { reason: "token_invalid" });
     }
     throw Object.assign(new Error("access_denied"), { reason: "access_denied" });
   }
-  if (res.status === 404) {
+  if (r.status === 404) {
     throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed", detail: "doc_not_found" });
   }
-  if (!res.ok) {
+  if (!r.ok) {
     throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed" });
   }
 
-  const json = (await res.json()) as YuqueDocResp;
+  // Tolerate abnormal response shape: missing data/body becomes empty content guard below.
   const title = json.data?.title ?? slug;
   const content = json.data?.body ?? json.data?.body_lake ?? "";
+  if (!content.trim()) {
+    throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed", detail: "empty_content" });
+  }
   return { title, content };
 }
 
