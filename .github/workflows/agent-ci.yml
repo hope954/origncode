@@ -1,0 +1,43 @@
+# Automated verification for the `agent/` package (Stage 2 backend closeout).
+# Runs TypeScript check and Vitest when agent code or this workflow changes.
+
+name: Agent CI
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "agent/**"
+      - ".github/workflows/agent-ci.yml"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - "agent/**"
+      - ".github/workflows/agent-ci.yml"
+
+defaults:
+  run:
+    working-directory: agent
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
