@@ -99,9 +99,14 @@ async function fetchYuqueDoc(
     throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed" });
   }
 
-  // Tolerate abnormal response shape: missing data/body becomes empty content guard below.
+  // Tolerate abnormal response shape, but distinguish unsupported structure vs empty content.
   const title = json.data?.title ?? slug;
-  const content = json.data?.body ?? json.data?.body_lake ?? "";
+  const body = json.data?.body;
+  const lake = json.data?.body_lake;
+  if (body === undefined && lake === undefined) {
+    throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed", detail: "unsupported_structure" });
+  }
+  const content = body ?? lake ?? "";
   if (!content.trim()) {
     throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed", detail: "empty_content" });
   }

@@ -86,7 +86,11 @@ async function fetchDocxRawContent(
     infoJson.data?.document?.title ??
     infoJson.data?.document?.document_id ??
     documentId;
-  const content = rawJson.data?.content ?? "";
+  const contentMaybe = rawJson.data?.content;
+  if (contentMaybe === undefined) {
+    throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed", detail: "unsupported_structure" });
+  }
+  const content = contentMaybe ?? "";
   if (!content.trim()) {
     throw Object.assign(new Error("fetch_failed"), { reason: "fetch_failed", detail: "empty_content" });
   }

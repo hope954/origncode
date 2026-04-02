@@ -126,9 +126,11 @@ async function refreshFeishuUserToken(appToken: string, refreshToken: string): P
   const json = (r.json ?? {}) as { code?: number; data?: FeishuUserTokens; msg?: string };
   if (!r.ok || json.code !== 0 || !json.data?.access_token) {
     const msg = (json.msg ?? "").toLowerCase();
+    // 不扩展新语义到上层：revoked 收口为 token_invalid（用户需重新授权/刷新配置）。
     if (msg.includes("revoked") || msg.includes("invalid")) {
-      throw Object.assign(new Error("token_revoked"), { reason: "token_revoked" });
+      throw Object.assign(new Error("token_invalid"), { reason: "token_invalid" });
     }
+    // 其他 refresh 失败默认按过期处理（仍保持 token_expired/token_invalid 可区分）
     throw Object.assign(new Error("token_expired"), { reason: "token_expired" });
   }
   return json.data;

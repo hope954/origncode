@@ -56,6 +56,20 @@ describe("stage5 round1 - stability guards for real paths (HTTP mocked)", () => 
     await expect(adapter.fetchDocument(docRef("yuque", url), "yq_valid_token_123456")).rejects.toMatchObject({ reason: "fetch_failed" });
   });
 
+  it("Yuque real path: distinguishes unsupported_structure vs empty_content in detail", async () => {
+    process.env.YUQUE_LIVE_FETCH = "1";
+    const adapter = new YuqueAdapter();
+    const url = "https://www.yuque.com/ns/book/slug";
+
+    // unsupported_structure (200 but neither body nor body_lake)
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: { title: "t" } }), { status: 200 })) as any);
+    await expect(adapter.fetchDocument(docRef("yuque", url), "yq_valid_token_123456")).rejects.toMatchObject({ reason: "fetch_failed", detail: "unsupported_structure" });
+
+    // empty_content (body present but empty string)
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: { title: "t", body: "" } }), { status: 200 })) as any);
+    await expect(adapter.fetchDocument(docRef("yuque", url), "yq_valid_token_123456")).rejects.toMatchObject({ reason: "fetch_failed", detail: "empty_content" });
+  });
+
   it("Feishu real path: token_expired vs access_denied vs empty_content are distinguished", async () => {
     process.env.FEISHU_APP_ID = "app";
     process.env.FEISHU_APP_SECRET = "sec";
@@ -99,6 +113,33 @@ describe("stage5 round1 - stability guards for real paths (HTTP mocked)", () => 
       }) as any
     );
     await expect(adapter.fetchDocument(docRef("feishu", url), "feishu_at_real")).rejects.toMatchObject({ reason: "fetch_failed" });
+  });
+
+  it("Feishu real path: distinguishes unsupported_structure vs empty_content in detail", async () => {
+    process.env.FEISHU_APP_ID = "app";
+    process.env.FEISHU_APP_SECRET = "sec";
+    const adapter = new FeishuAdapter();
+    const url = "https://tenant.feishu.cn/docx/DOCID";
+
+    // unsupported_structure (raw_content data missing content)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (u: string) => {
+        if (u.includes("/raw_content")) return new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 });
+        return new Response(JSON.stringify({ code: 0, data: { document: { title: "T" } } }), { status: 200 });
+      }) as any
+    );
+    await expect(adapter.fetchDocument(docRef("feishu", url), "feishu_at_real")).rejects.toMatchObject({ reason: "fetch_failed", detail: "unsupported_structure" });
+
+    // empty_content (raw_content content empty string)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (u: string) => {
+        if (u.includes("/raw_content")) return new Response(JSON.stringify({ code: 0, data: { content: "" } }), { status: 200 });
+        return new Response(JSON.stringify({ code: 0, data: { document: { title: "T" } } }), { status: 200 });
+      }) as any
+    );
+    await expect(adapter.fetchDocument(docRef("feishu", url), "feishu_at_real")).rejects.toMatchObject({ reason: "fetch_failed", detail: "empty_content" });
   });
 });
 

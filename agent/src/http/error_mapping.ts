@@ -3,6 +3,7 @@ import { ApiCode } from "./api_codes.js";
 export type ErrorReason =
   | "token_expired"
   | "token_invalid"
+  | "token_revoked"
   | "access_denied"
   | "fetch_failed"
   | "auth_required"
@@ -18,6 +19,9 @@ export function mapErrorReasonToApi(reason: ErrorReason): { code: number; messag
     case "token_expired":
       return { code: ApiCode.INVALID_PARAMS, message: "token_expired" };
     case "token_invalid":
+      return { code: ApiCode.INVALID_PARAMS, message: "token_invalid" };
+    // 收口：不扩展新语义到 API 契约；revoked 统一按 invalid 处理。
+    case "token_revoked":
       return { code: ApiCode.INVALID_PARAMS, message: "token_invalid" };
     case "access_denied":
       return { code: ApiCode.ACCESS_DENIED, message: "access_denied" };

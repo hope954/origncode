@@ -159,9 +159,9 @@ export class AnalysisOrchestrator {
         } catch (err) {
           const reason: string = (err as { reason?: string }).reason ?? "fetch_failed";
           const docStatus: DocumentRef["status"] =
-            reason === "access_denied" || reason === "token_revoked"
+            reason === "access_denied"
               ? "access_denied"
-              : reason === "auth_required" || reason === "token_expired" || reason === "token_invalid"
+              : reason === "auth_required" || reason === "token_expired" || reason === "token_invalid" || reason === "token_revoked"
                 ? "auth_required"
                 : "failed";
           logEvent("warn", "document.fetch.failed", {
