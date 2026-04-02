@@ -68,6 +68,7 @@ export function extractFactsFromChunk(sessionId: string, chunk: Chunk): Fact[] {
 
     facts.push({
       fact_id: makeId("fact"),
+      extraction_tier: "rule",
       session_id: sessionId,
       chunk_id: chunk.chunk_id,
       project_name: projectName,

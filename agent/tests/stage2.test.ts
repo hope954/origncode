@@ -3,6 +3,7 @@ import path from "node:path";
 import request from "supertest";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { ApiCode } from "../src/http/api_codes.js";
 
 const dataFile = path.resolve("./data/store.stage2.json");
 
@@ -46,15 +47,18 @@ describe("stage2 resume pipeline", () => {
       desired_highlight_count: 3
     });
     expect(analyze.status).toBe(200);
+    expect(analyze.body.code).toBe(ApiCode.OK);
     expect(analyze.body.data.task_id).toBeTruthy();
 
     const result = await request(app).get(`/api/resume/result?session_id=${sessionId}`).expect(200);
+    expect(result.body.code).toBe(ApiCode.OK);
     expect(result.body.data.highlights.length).toBeGreaterThan(0);
     const hl = result.body.data.highlights[0];
     expect(hl.content).toBeTruthy();
     expect(hl.highlight_id).toBeTruthy();
 
     const ev = await request(app).get(`/api/resume/evidence?highlight_id=${hl.highlight_id}`).expect(200);
+    expect(ev.body.code).toBe(ApiCode.OK);
     expect(ev.body.data.source_chunks.length).toBeGreaterThan(0);
     expect(ev.body.data.facts.length).toBeGreaterThan(0);
     expect(ev.body.data.source_docs.length).toBeGreaterThan(0);
@@ -101,11 +105,12 @@ describe("stage2 resume pipeline", () => {
     });
     const res = await request(app).post("/api/resume/analyze").send({ session_id: sessionId });
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("generation_failed");
+    expect(res.body.code).toBe(ApiCode.GENERATION_FAILED);
   });
 
   it("GET /api/resume/evidence 404 for unknown highlight", async () => {
     const app = createApp();
-    await request(app).get("/api/resume/evidence?highlight_id=hl_missing").expect(404);
+    const r = await request(app).get("/api/resume/evidence?highlight_id=hl_missing").expect(404);
+    expect(r.body.code).toBe(ApiCode.NOT_FOUND);
   });
 });

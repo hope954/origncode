@@ -3,6 +3,7 @@ import path from "node:path";
 import request from "supertest";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { ApiCode } from "../src/http/api_codes.js";
 
 const dataFile = path.resolve("./data/store.test.json");
 
@@ -36,6 +37,7 @@ describe("stage1 core flows", () => {
       docs: [{ platform: "feishu", url: "https://feishu.cn/doc/1" }]
     });
     expect(good.status).toBe(200);
+    expect(good.body.code).toBe(ApiCode.OK);
   });
 
   it("validates Feishu OAuth minimal flow", async () => {
@@ -114,7 +116,8 @@ describe("stage1 core flows", () => {
       token: "short"
     });
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("token_invalid");
+    expect(res.body.code).toBe(ApiCode.INVALID_PARAMS);
+    expect(res.body.message).toBe("token_invalid");
   });
 
   it("POST /api/auth/refresh rejects unsupported_platform for Yuque", async () => {
@@ -124,7 +127,7 @@ describe("stage1 core flows", () => {
       user_id: "u1"
     });
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("unsupported_platform");
+    expect(res.body.code).toBe(ApiCode.UNSUPPORTED_PLATFORM);
   });
 
   it("POST /api/auth/refresh refreshes Feishu when refresh token exists", async () => {
@@ -157,6 +160,7 @@ describe("stage1 core flows", () => {
       user_id: "u_norefresh"
     });
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("token_invalid");
+    expect(res.body.code).toBe(ApiCode.INVALID_PARAMS);
+    expect(res.body.message).toBe("token_invalid");
   });
 });

@@ -115,6 +115,7 @@ export class ResumePipelineService {
     if (factSet.length === 0) {
       factSet = chunks.map((c) => ({
         fact_id: makeId("fact"),
+        extraction_tier: "synthetic_fallback" as const,
         session_id: input.session_id,
         chunk_id: c.chunk_id,
         project_name: c.title_path[0] ?? null,
@@ -128,7 +129,7 @@ export class ResumePipelineService {
         metric: null,
         collaboration: null,
         evidence_text: c.text.slice(0, 400),
-        confidence: c.relevance_score * 0.8
+        confidence: Math.min(0.12, c.relevance_score * 0.12)
       }));
     }
 
@@ -238,6 +239,7 @@ export class ResumePipelineService {
     source_chunks: Array<{ chunk_id: string; title_path: string[]; cleaned_text: string }>;
     facts: Array<{
       fact_id: string;
+      extraction_tier: Fact["extraction_tier"];
       action: string | null;
       result: string | null;
       metric: string | null;
@@ -273,6 +275,7 @@ export class ResumePipelineService {
       source_chunks,
       facts: facts.map((f) => ({
         fact_id: f.fact_id,
+        extraction_tier: f.extraction_tier,
         action: f.action,
         result: f.result,
         metric: f.metric

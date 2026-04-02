@@ -26,10 +26,13 @@ export function mergeFactsToExperiences(sessionId: string, facts: Fact[]): Exper
     const projectName = group[0]?.project_name ?? null;
 
     const avgConf = group.reduce((s, f) => s + f.confidence, 0) / Math.max(1, group.length);
+    const degraded = group.length > 0 && group.every((f) => f.extraction_tier === "synthetic_fallback");
+    const confidenceScore = degraded ? Number((avgConf * 0.22).toFixed(3)) : Number(avgConf.toFixed(3));
 
     experiences.push({
       experience_id: makeId("exp"),
       session_id: sessionId,
+      degraded,
       project_name: projectName,
       summary_theme: projectName ?? "经历聚合",
       fact_ids: factIds,
@@ -41,7 +44,7 @@ export function mergeFactsToExperiences(sessionId: string, facts: Fact[]): Exper
       merged_results: [],
       merged_metrics: metrics,
       evidence_chunk_ids: chunkIds,
-      confidence_score: Number(avgConf.toFixed(3))
+      confidence_score: confidenceScore
     });
   }
 

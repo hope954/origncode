@@ -93,6 +93,8 @@ export interface Chunk {
 /** Extracted from chunk text only — no platform API coupling. */
 export interface Fact {
   fact_id: string;
+  /** `rule`: 规则抽取；`synthetic_fallback`: 规则未命中时由 chunk 合成的降级事实（不得与规则事实同权竞争排序）。 */
+  extraction_tier: "rule" | "synthetic_fallback";
   session_id: string;
   chunk_id: string;
   project_name: string | null;
@@ -112,6 +114,8 @@ export interface Fact {
 export interface Experience {
   experience_id: string;
   session_id: string;
+  /** 当且仅当聚合内全部 fact 均为 synthetic_fallback 时为 true。 */
+  degraded: boolean;
   project_name: string | null;
   summary_theme: string;
   fact_ids: string[];

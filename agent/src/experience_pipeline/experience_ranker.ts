@@ -23,7 +23,9 @@ export function rankExperiences(experiences: Experience[], targetJob: Session["t
     for (const p of patterns) {
       if (p.test(blob)) hits += 1;
     }
-    return e.confidence_score + hits * 0.15;
+    let s = e.confidence_score + hits * 0.15;
+    if (e.degraded) s -= 1.2;
+    return s;
   };
 
   return [...experiences].sort((a, b) => score(b) - score(a));

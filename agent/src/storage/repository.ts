@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
-import type { DataStore } from "../types.js";
+import type { DataStore, Experience, Fact } from "../types.js";
 
 const INITIAL_DATA: DataStore = {
   sessions: [],
@@ -18,6 +18,14 @@ const INITIAL_DATA: DataStore = {
 
 function normalizeLoaded(raw: unknown): DataStore {
   const p = raw as Partial<DataStore>;
+  const facts = (p.facts ?? []).map((f) => ({
+    ...(f as Fact),
+    extraction_tier: (f as Fact).extraction_tier ?? "rule"
+  }));
+  const experiences = (p.experiences ?? []).map((e) => ({
+    ...(e as Experience),
+    degraded: (e as Experience).degraded ?? false
+  }));
   return {
     sessions: p.sessions ?? [],
     platformAuths: p.platformAuths ?? [],
@@ -25,8 +33,8 @@ function normalizeLoaded(raw: unknown): DataStore {
     normalizedDocuments: p.normalizedDocuments ?? [],
     chunks: p.chunks ?? [],
     analysisTasks: p.analysisTasks ?? [],
-    facts: p.facts ?? [],
-    experiences: p.experiences ?? [],
+    facts,
+    experiences,
     highlights: p.highlights ?? [],
     resumeAnalysisTasks: p.resumeAnalysisTasks ?? []
   };
