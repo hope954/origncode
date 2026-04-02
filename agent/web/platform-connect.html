@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>平台连接页 - Stage 6 基线</title>
+    <link rel="stylesheet" href="./platform-connect.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>平台连接（最小闭环）</h1>
+      <p class="hint">
+        仅用于前端接入基线联调。展示 <code>auth_status</code>、错误分类与
+        <code>request_id</code>。
+      </p>
+
+      <section class="card">
+        <h2>基础上下文</h2>
+        <div class="grid">
+          <label>user_id <input id="userId" value="u_frontend" /></label>
+          <label>session_id <input id="sessionId" placeholder="可选；可先创建会话" /></label>
+          <button id="createSessionBtn" type="button">创建会话</button>
+          <button id="loadStatusBtn" type="button">刷新连接状态</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>飞书连接</h2>
+        <div class="grid">
+          <button id="getFeishuUrlBtn" type="button">获取授权地址</button>
+          <label>auth_code <input id="feishuCode" placeholder="回调 code（手工填入）" /></label>
+          <button id="feishuCallbackBtn" type="button">提交 callback</button>
+          <button id="feishuRefreshBtn" type="button">刷新 token</button>
+        </div>
+        <pre id="feishuInfo" class="mono"></pre>
+      </section>
+
+      <section class="card">
+        <h2>语雀连接</h2>
+        <div class="grid">
+          <label>token <input id="yuqueToken" type="password" placeholder="不会在页面回显明文" /></label>
+          <button id="yuqueVerifyBtn" type="button">verify</button>
+          <button id="yuqueSaveBtn" type="button">save</button>
+          <button id="yuqueDeleteBtn" type="button">delete</button>
+        </div>
+        <pre id="yuqueInfo" class="mono"></pre>
+      </section>
+
+      <section class="card">
+        <h2>当前状态</h2>
+        <pre id="statusBox" class="mono"></pre>
+      </section>
+
+      <section class="card">
+        <h2>最近请求信息（排障）</h2>
+        <pre id="debugBox" class="mono"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./platform-connect.js"></script>
+  </body>
+</html>

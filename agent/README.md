@@ -66,7 +66,7 @@ Previously all platform HTTP was mocked. Stage 4 replaced every mock point with 
 
 ## Not implemented yet (MVP scope boundaries)
 
-- Dedicated **web UI** for evidence chains / highlight editing (APIs exist; no shipped frontend in this repo).
+- Dedicated **web UI** for导入/分析/结果/证据链完整产品流程（当前仅提供 Stage 6 最小平台连接页：`/platform-connect/platform-connect.html`）。
 - OpenSpec task **7.4**（结果页 evidence 展示交互）— 前端范围，本仓库仅提供 API。
 - **Multi-tenant DB / S3** 等替代 JSON 文件存储（需替换 `Repository` 实现）。
 - Feishu **Wiki / Bitable / Sheet** URL 格式支持（当前仅 `/docx/` + `/docs/` 路径，见 `FeishuAdapter` 注释）。

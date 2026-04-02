@@ -7,6 +7,8 @@
  * Routes calling async auth/adapter operations are async; all other routes remain sync.
  */
 import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { AuthService } from "./auth_service/service.js";
 import { AnalysisOrchestrator } from "./analysis_orchestrator/service.js";
@@ -69,6 +71,10 @@ const sessionClearSchema = z.object({
 export function createApp() {
   const app = express();
   app.use(express.json());
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const webRoot = path.resolve(__dirname, "../web");
+  app.use("/platform-connect", express.static(webRoot));
 
   // request_id / correlation_id middleware (Master Spec §15.1)
   app.use((req, res, next) => {
