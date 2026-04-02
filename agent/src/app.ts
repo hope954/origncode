@@ -11,6 +11,7 @@ import { z } from "zod";
 import { AuthService } from "./auth_service/service.js";
 import { AnalysisOrchestrator } from "./analysis_orchestrator/service.js";
 import { ApiCode, errBody, okBody } from "./http/api_codes.js";
+import { feishuConfigured } from "./config.js";
 import { FeishuAdapter } from "./platform_adapters/feishuAdapter.js";
 import { YuqueAdapter } from "./platform_adapters/yuqueAdapter.js";
 import { Repository } from "./storage/repository.js";
@@ -167,7 +168,11 @@ export function createApp() {
         session_id: body.data.session_id,
         auth_status: auth.auth_status
       });
-      return sendOk(res, { platform: auth.platform, auth_status: auth.auth_status });
+      return sendOk(res, {
+        platform: auth.platform,
+        auth_status: auth.auth_status,
+        auth_mode: feishuConfigured() ? "real" : "fallback"
+      });
     } catch (err) {
       const reason = (err as { reason?: string }).reason ?? "auth_required";
       const mapped = mapErrorReasonToApi(reason);
@@ -215,7 +220,7 @@ export function createApp() {
         return sendErr(res, 400, mapped.code, mapped.message, buildErrorContext({ stage: "auth_refresh", platform: "feishu", reason: "token_invalid", user_id: body.data.user_id, session_id: body.data.session_id }));
       }
       logEvent("info", "auth.feishu.refresh.success", { request_id: requestIdFrom(res), user_id: body.data.user_id, session_id: body.data.session_id, auth_status: refreshed.auth_status });
-      return sendOk(res, { platform: "feishu", auth_status: refreshed.auth_status });
+      return sendOk(res, { platform: "feishu", auth_status: refreshed.auth_status, auth_mode: feishuConfigured() ? "real" : "fallback" });
     } catch (err) {
       const reason = (err as { reason?: string }).reason ?? "token_expired";
       const mapped = mapErrorReasonToApi(reason);
@@ -231,7 +236,7 @@ export function createApp() {
     logEvent("info", "auth.yuque.verify.start", { request_id: requestIdFrom(res) });
     const valid = await authService.verifyYuqueToken(body.data.token);
     logEvent("info", "auth.yuque.verify.done", { request_id: requestIdFrom(res), valid });
-    return sendOk(res, { valid });
+    return sendOk(res, { valid, verify_mode: process.env.YUQUE_LIVE_VERIFY === "1" ? "live" : "structural" });
   });
 
   // async: saveYuqueToken awaits verifyYuqueToken

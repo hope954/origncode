@@ -168,7 +168,7 @@ export class YuqueAdapter {
         parsed.book,
         parsed.slug,
         accessToken,
-        config.yuque.baseUrl
+        (process.env.YUQUE_BASE_URL ?? config.yuque.baseUrl).replace(/\/$/, "")
       );
       return buildNormalizedDoc(doc, title, content);
     }

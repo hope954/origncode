@@ -136,7 +136,7 @@ export class FeishuAdapter {
       const { title, content } = await fetchDocxRawContent(
         parsed.id,
         userAccessToken,
-        config.feishu.baseUrl
+        (process.env.FEISHU_BASE_URL ?? config.feishu.baseUrl).replace(/\/$/, "")
       );
       return buildNormalizedDoc(doc, title, content);
     }
