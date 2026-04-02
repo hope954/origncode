@@ -9,8 +9,28 @@ const INITIAL_DATA: DataStore = {
   documentRefs: [],
   normalizedDocuments: [],
   chunks: [],
-  analysisTasks: []
+  analysisTasks: [],
+  facts: [],
+  experiences: [],
+  highlights: [],
+  resumeAnalysisTasks: []
 };
+
+function normalizeLoaded(raw: unknown): DataStore {
+  const p = raw as Partial<DataStore>;
+  return {
+    sessions: p.sessions ?? [],
+    platformAuths: p.platformAuths ?? [],
+    documentRefs: p.documentRefs ?? [],
+    normalizedDocuments: p.normalizedDocuments ?? [],
+    chunks: p.chunks ?? [],
+    analysisTasks: p.analysisTasks ?? [],
+    facts: p.facts ?? [],
+    experiences: p.experiences ?? [],
+    highlights: p.highlights ?? [],
+    resumeAnalysisTasks: p.resumeAnalysisTasks ?? []
+  };
+}
 
 export class Repository {
   private data: DataStore;
@@ -29,11 +49,13 @@ export class Repository {
       return structuredClone(INITIAL_DATA);
     }
     const raw = fs.readFileSync(this.dataFile, "utf8");
-    return { ...INITIAL_DATA, ...JSON.parse(raw) };
+    return normalizeLoaded(JSON.parse(raw));
   }
 
   private persist(): void {
-    fs.writeFileSync(this.dataFile, JSON.stringify(this.data, null, 2), "utf8");
+    const tmp = `${this.dataFile}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), "utf8");
+    fs.renameSync(tmp, this.dataFile);
   }
 
   snapshot(): DataStore {

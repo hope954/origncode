@@ -149,11 +149,17 @@ export class AnalysisOrchestrator {
     }
 
     const result = this.getSessionResult(task.session_id);
+    const ingestTaskStatus: AnalysisTask["status"] =
+      result.session_status === "partial_success"
+        ? "partial_success"
+        : result.session_status === "failed"
+          ? "failed"
+          : "completed";
     this.repo.mutate((data) => {
       const targetTask = data.analysisTasks.find((item) => item.task_id === taskId);
       const targetSession = data.sessions.find((item) => item.session_id === task.session_id);
       if (targetTask) {
-        targetTask.status = result.session_status === "partial_success" ? "partial_success" : result.session_status;
+        targetTask.status = ingestTaskStatus;
         targetTask.failure_reasons = failures;
         targetTask.updated_at = new Date().toISOString();
       }

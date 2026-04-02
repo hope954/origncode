@@ -40,24 +40,24 @@
 
 ## 5. 事实抽取与经历聚合
 
-- [ ] 5.1 实现 `fact_extractor`（动作、职责、技术、成果、指标、evidence_text）
-- [ ] 5.2 持久化 fact 层并建立 fact -> chunk 映射索引
-- [ ] 5.3 实现 `experience_merger`（跨文档聚合同经历）
-- [ ] 5.4 实现 `experience_ranker`（与 target_job 相关性排序）
-- [ ] 5.5 持久化 experience 层并保留 experience -> fact/chunk 映射
+- [x] 5.1 实现 `fact_extractor`（动作、职责、技术、成果、指标、evidence_text）
+- [x] 5.2 持久化 fact 层并建立 fact -> chunk 映射索引
+- [x] 5.3 实现 `experience_merger`（跨文档聚合同经历）
+- [x] 5.4 实现 `experience_ranker`（与 target_job 相关性排序）
+- [x] 5.5 持久化 experience 层并保留 experience -> fact/chunk 映射
 
 ## 6. 简历亮点生成与重写
 
-- [ ] 6.1 实现 `highlight_generator`（基于 experience 输入生成 3-5 条简历亮点）
-- [ ] 6.2 强制生成入口显式传入 `target_job` 与 `style`
-- [ ] 6.3 实现 `highlight_rewriter`（单条重写，禁止脱离原 evidence）
-- [ ] 6.4 持久化 highlight 层并记录参数快照（target_job/style）
+- [x] 6.1 实现 `highlight_generator`（基于 experience 输入生成 3-5 条简历亮点）
+- [x] 6.2 强制生成入口显式传入 `target_job` 与 `style`
+- [x] 6.3 实现 `highlight_rewriter`（单条重写，禁止脱离原 evidence）
+- [x] 6.4 持久化 highlight 层并记录参数快照（target_job/style）
 
 ## 7. Evidence 链路与查询
 
-- [ ] 7.1 实现 `evidence_binder`（highlight -> experience -> fact -> chunk -> doc 绑定）
-- [ ] 7.2 实现 evidence 完整性校验 gate（不完整则阻断该条输出）
-- [ ] 7.3 实现 `resume/evidence` 查询接口并返回结构化证据 payload
+- [x] 7.1 实现 `evidence_binder`（highlight -> experience -> fact -> chunk -> doc 绑定）
+- [x] 7.2 实现 evidence 完整性校验 gate（不完整则阻断该条输出）
+- [x] 7.3 实现 `resume/evidence` 查询接口并返回结构化证据 payload
 - [ ] 7.4 实现结果页 evidence 展示与来源回溯交互
 
 ## 8. 结果编辑与会话清理

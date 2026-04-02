@@ -10,6 +10,7 @@ import { AnalysisOrchestrator } from "./analysis_orchestrator/service.js";
 import { FeishuAdapter } from "./platform_adapters/feishuAdapter.js";
 import { YuqueAdapter } from "./platform_adapters/yuqueAdapter.js";
 import { Repository } from "./storage/repository.js";
+import { ResumePipelineService } from "./resume_pipeline/service.js";
 
 const sessionSchema = z.object({
   user_id: z.string().min(1),
@@ -28,6 +29,20 @@ const analysisSchema = z.object({
   user_id: z.string()
 });
 
+const resumeAnalyzeSchema = z.object({
+  session_id: z.string(),
+  doc_ids: z.array(z.string()).optional(),
+  target_job: z.enum(["generic", "engineering", "product", "operations"]).optional(),
+  styles: z.array(z.enum(["concise", "technical", "business"])).optional(),
+  desired_highlight_count: z.number().int().min(3).max(5).optional()
+});
+
+const resumeRewriteSchema = z.object({
+  highlight_id: z.string(),
+  style: z.enum(["concise", "technical", "business"]),
+  target_job: z.enum(["generic", "engineering", "product", "operations"])
+});
+
 export function createApp() {
   const app = express();
   app.use(express.json());
@@ -35,6 +50,7 @@ export function createApp() {
   const repo = new Repository();
   const authService = new AuthService(repo);
   const orchestrator = new AnalysisOrchestrator(repo, authService, new FeishuAdapter(), new YuqueAdapter());
+  const resumePipeline = new ResumePipelineService(repo);
 
   app.post("/api/session/create", (req, res) => {
     const parsed = sessionSchema.safeParse(req.body);
@@ -134,6 +150,70 @@ export function createApp() {
   app.get("/api/analysis/result", (req, res) => {
     const sessionId = String(req.query.session_id ?? "");
     return res.json({ code: "ok", data: orchestrator.getSessionResult(sessionId) });
+  });
+
+  /** Full resume pipeline: Chunk → Fact → Experience → Highlight (uses session.user_id context via stored session only). */
+  app.post("/api/resume/analyze", (req, res) => {
+    const parsed = resumeAnalyzeSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ code: "invalid_request" });
+    const task = resumePipeline.runAnalyze(parsed.data);
+    if (task.status === "failed") {
+      return res.status(400).json({ code: "generation_failed", data: { task_id: task.task_id, status: task.status } });
+    }
+    return res.json({
+      code: "ok",
+      data: {
+        task_id: task.task_id,
+        status: task.status === "completed" || task.status === "partial_success" ? "completed" : task.status
+      }
+    });
+  });
+
+  app.get("/api/resume/result", (req, res) => {
+    const sessionId = String(req.query.session_id ?? "");
+    const bundle = resumePipeline.getResult(sessionId);
+    const highlights = bundle.highlights.map((h) => ({
+      highlight_id: h.highlight_id,
+      style: h.style,
+      target_job: h.target_job,
+      content: h.final_content,
+      confidence_score: h.confidence_score,
+      is_edited: h.is_edited
+    }));
+    return res.json({
+      code: "ok",
+      data: {
+        session_id: bundle.session_id,
+        status: bundle.status,
+        highlights,
+        warnings: bundle.warnings
+      }
+    });
+  });
+
+  app.get("/api/resume/evidence", (req, res) => {
+    const highlightId = String(req.query.highlight_id ?? "");
+    const ev = resumePipeline.getEvidence(highlightId);
+    if (!ev) return res.status(404).json({ code: "not_found" });
+    return res.json({ code: "ok", data: ev });
+  });
+
+  app.post("/api/resume/rewrite", (req, res) => {
+    const parsed = resumeRewriteSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ code: "invalid_request" });
+    const next = resumePipeline.rewriteHighlight(
+      parsed.data.highlight_id,
+      parsed.data.style,
+      parsed.data.target_job
+    );
+    if (!next) return res.status(404).json({ code: "not_found" });
+    return res.json({
+      code: "ok",
+      data: {
+        highlight_id: next.highlight_id,
+        rewritten_content: next.final_content
+      }
+    });
   });
 
   app.get("/api/storage/snapshot", (_req, res) => {

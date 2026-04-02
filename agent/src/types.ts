@@ -90,15 +90,56 @@ export interface Chunk {
   created_at: string;
 }
 
-// Reserved models for next stage; kept as explicit contract.
+/** Extracted from chunk text only — no platform API coupling. */
 export interface Fact {
   fact_id: string;
+  session_id: string;
+  chunk_id: string;
+  project_name: string | null;
+  background: string | null;
+  user_role: string | null;
+  action: string | null;
+  tool_stack: string[];
+  challenge: string | null;
+  solution: string | null;
+  result: string | null;
+  metric: string | null;
+  collaboration: string | null;
+  evidence_text: string;
+  confidence: number;
 }
+
 export interface Experience {
   experience_id: string;
+  session_id: string;
+  project_name: string | null;
+  summary_theme: string;
+  fact_ids: string[];
+  merged_background: string | null;
+  merged_actions: string[];
+  merged_tool_stack: string[];
+  merged_challenges: string[];
+  merged_solutions: string[];
+  merged_results: string[];
+  merged_metrics: string[];
+  evidence_chunk_ids: string[];
+  confidence_score: number;
 }
+
 export interface Highlight {
   highlight_id: string;
+  session_id: string;
+  experience_id: string;
+  style: "concise" | "technical" | "business";
+  target_job: Session["target_job"];
+  title: string | null;
+  content: string;
+  evidence_fact_ids: string[];
+  confidence_score: number;
+  status: HighlightStatus;
+  is_edited: boolean;
+  original_content: string;
+  final_content: string;
 }
 
 export interface AnalysisTask {
@@ -110,6 +151,14 @@ export interface AnalysisTask {
   updated_at: string;
 }
 
+export interface ResumeAnalysisTask {
+  task_id: string;
+  session_id: string;
+  status: "extracting" | "merging" | "generating" | "completed" | "failed" | "partial_success";
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DataStore {
   sessions: Session[];
   platformAuths: PlatformAuth[];
@@ -117,4 +166,8 @@ export interface DataStore {
   normalizedDocuments: NormalizedDocument[];
   chunks: Chunk[];
   analysisTasks: AnalysisTask[];
+  facts: Fact[];
+  experiences: Experience[];
+  highlights: Highlight[];
+  resumeAnalysisTasks: ResumeAnalysisTask[];
 }

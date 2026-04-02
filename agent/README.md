@@ -8,11 +8,17 @@
 - Document pipeline: `NormalizedDocument`, `document_normalizer`, `content_cleaner`, `chunker`
 - Privacy/storage basics: `PlatformAuth` with encrypted token fields and minimized persistence
 
+## Phase 2 (resume pipeline) — implemented
+
+- `Chunk → Fact → Experience → Highlight`（规则化抽取与生成，不依赖平台 mock）
+- `POST /api/resume/analyze`、`GET /api/resume/result`、`GET /api/resume/evidence`、`POST /api/resume/rewrite`
+- Fact / Experience / Highlight 持久化与 evidence 绑定
+
 ## Not implemented yet
 
-- Fact extraction / experience / highlight generation (phase 2)
-- Evidence detail UI / result edit UI
-- Full release gates
+- Evidence / result **复杂前端页**
+- `POST /api/resume/highlight/save`、`delete`，`session/clear` 等（见 tasks 第 8 节）
+- Full release gates（tasks 第 10 节）
 
 ---
 
@@ -53,6 +59,10 @@
 | POST | `/api/analysis/start` | `{ session_id, user_id }` |
 | GET | `/api/analysis/task?task_id=` | Task status |
 | GET | `/api/analysis/result?session_id=` | Aggregate doc outcomes |
+| POST | `/api/resume/analyze` | Body: `session_id`, optional `doc_ids`, `target_job`, `styles`, `desired_highlight_count` |
+| GET | `/api/resume/result?session_id=` | Highlights + warnings |
+| GET | `/api/resume/evidence?highlight_id=` | Evidence chain |
+| POST | `/api/resume/rewrite` | Body: `highlight_id`, `style`, `target_job` |
 
 Debug: `GET /api/storage/snapshot` (encrypted tokens only in store).
 
