@@ -141,9 +141,14 @@ export interface Highlight {
   evidence_fact_ids: string[];
   confidence_score: number;
   status: HighlightStatus;
+  /** User saved edited text via `POST /api/resume/highlight/save`. */
   is_edited: boolean;
+  /** First generated or rewritten baseline; not overwritten by save. */
   original_content: string;
+  /** Current text shown in result API (user edits, rewrites, or generation). */
   final_content: string;
+  /** Soft-delete timestamp; when set with status `deleted`, row kept for audit only. */
+  deleted_at?: string | null;
 }
 
 export interface AnalysisTask {

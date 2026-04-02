@@ -14,6 +14,7 @@ import { FeishuAdapter } from "./platform_adapters/feishuAdapter.js";
 import { YuqueAdapter } from "./platform_adapters/yuqueAdapter.js";
 import { Repository } from "./storage/repository.js";
 import { ResumePipelineService } from "./resume_pipeline/service.js";
+import { clearSessionData } from "./session_lifecycle/clear_session.js";
 
 const sessionSchema = z.object({
   user_id: z.string().min(1),
@@ -46,6 +47,20 @@ const resumeRewriteSchema = z.object({
   target_job: z.enum(["generic", "engineering", "product", "operations"])
 });
 
+const resumeHighlightSaveSchema = z.object({
+  highlight_id: z.string(),
+  final_content: z.string().min(1)
+});
+
+const resumeHighlightDeleteSchema = z.object({
+  highlight_id: z.string()
+});
+
+const sessionClearSchema = z.object({
+  session_id: z.string(),
+  user_id: z.string().optional()
+});
+
 export function createApp() {
   const app = express();
   app.use(express.json());
@@ -60,6 +75,19 @@ export function createApp() {
     if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
     const session = orchestrator.createSession(parsed.data);
     return res.json(okBody(session));
+  });
+
+  app.post("/api/session/clear", (req, res) => {
+    const parsed = sessionClearSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    const result = clearSessionData(repo, parsed.data.session_id, parsed.data.user_id);
+    if (!result.ok && result.reason === "not_found") {
+      return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
+    }
+    if (!result.ok && result.reason === "forbidden") {
+      return res.status(403).json(errBody(ApiCode.ACCESS_DENIED, "access_denied"));
+    }
+    return res.json(okBody({ session_id: parsed.data.session_id, cleared: true }));
   });
 
   app.get("/api/auth/url", (req, res) => {
@@ -216,6 +244,52 @@ export function createApp() {
       okBody({
         highlight_id: next.highlight_id,
         rewritten_content: next.final_content
+      })
+    );
+  });
+
+  app.post("/api/resume/highlight/save", (req, res) => {
+    const parsed = resumeHighlightSaveSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    const out = resumePipeline.saveHighlightContent(parsed.data.highlight_id, parsed.data.final_content);
+    if (!out.ok) {
+      if (out.reason === "not_found" || out.reason === "deleted") {
+        return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
+      }
+      if (out.reason === "invalid_content") {
+        return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+      }
+      return res.status(400).json(errBody(ApiCode.GENERATION_FAILED, "evidence_incomplete"));
+    }
+    return res.json(
+      okBody({
+        highlight_id: out.highlight.highlight_id,
+        final_content: out.highlight.final_content,
+        original_content: out.highlight.original_content,
+        is_edited: out.highlight.is_edited
+      })
+    );
+  });
+
+  app.post("/api/resume/highlight/delete", (req, res) => {
+    const parsed = resumeHighlightDeleteSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json(errBody(ApiCode.INVALID_PARAMS, "invalid_params"));
+    const out = resumePipeline.softDeleteHighlight(parsed.data.highlight_id);
+    if (!out.ok) {
+      if (out.reason === "not_found") return res.status(404).json(errBody(ApiCode.NOT_FOUND, "not_found"));
+      return res.json(
+        okBody({
+          highlight_id: parsed.data.highlight_id,
+          status: "deleted" as const,
+          idempotent: true
+        })
+      );
+    }
+    return res.json(
+      okBody({
+        highlight_id: out.highlight.highlight_id,
+        status: "deleted" as const,
+        idempotent: false
       })
     );
   });

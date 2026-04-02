@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
-import type { DataStore, Experience, Fact } from "../types.js";
+import type { DataStore, Experience, Fact, Highlight } from "../types.js";
 
 const INITIAL_DATA: DataStore = {
   sessions: [],
@@ -26,6 +26,14 @@ function normalizeLoaded(raw: unknown): DataStore {
     ...(e as Experience),
     degraded: (e as Experience).degraded ?? false
   }));
+  const highlights = (p.highlights ?? []).map((h) => {
+    const x = h as Highlight;
+    return {
+      ...x,
+      status: x.status ?? "generated",
+      deleted_at: x.deleted_at ?? undefined
+    };
+  });
   return {
     sessions: p.sessions ?? [],
     platformAuths: p.platformAuths ?? [],
@@ -35,7 +43,7 @@ function normalizeLoaded(raw: unknown): DataStore {
     analysisTasks: p.analysisTasks ?? [],
     facts,
     experiences,
-    highlights: p.highlights ?? [],
+    highlights,
     resumeAnalysisTasks: p.resumeAnalysisTasks ?? []
   };
 }

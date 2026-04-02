@@ -30,3 +30,13 @@
 | 5004 | internal_error | 内部错误 |
 
 > 历史说明：曾使用字符串 `code: "ok"`，已废弃；以本文件与代码为准。
+
+## Stage 3 路由补充（实现约定）
+
+| 路由 | 成功 | 典型错误 |
+|------|------|----------|
+| `POST /api/resume/highlight/save` | `code: 0`，`data` 含 `final_content`、`original_content`、`is_edited` | `4001` 空内容；`4007` 无此亮点或已软删；`5003` evidence 链不完整（`message: evidence_incomplete`） |
+| `POST /api/resume/highlight/delete` | `code: 0`，`data.status: deleted`；重复删除 `idempotent: true` | `4007` 未知 `highlight_id` |
+| `POST /api/session/clear` | `code: 0`，`data.cleared: true` | `4007` 无此 session；`4005` `user_id` 与 session 不匹配 |
+
+软删后的亮点：`GET /api/resume/evidence` 返回 **404** + body `code: 4007`（与资源不存在一致）。`POST /api/session/clear` 后同会话 evidence 亦为 **404**。

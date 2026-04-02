@@ -212,7 +212,7 @@ export class ResumePipelineService {
   } {
     const data = this.repo.snapshot();
     const session = data.sessions.find((s) => s.session_id === sessionId);
-    const highlights = data.highlights.filter((h) => h.session_id === sessionId);
+    const highlights = data.highlights.filter((h) => h.session_id === sessionId && h.status !== "deleted");
     const warnings: string[] = [];
     const docFails = data.documentRefs.filter(
       (d) => d.session_id === sessionId && ["auth_required", "access_denied", "failed"].includes(d.status)
@@ -247,7 +247,7 @@ export class ResumePipelineService {
   } | null {
     const data = this.repo.snapshot();
     const highlight = data.highlights.find((h) => h.highlight_id === highlightId);
-    if (!highlight) return null;
+    if (!highlight || highlight.status === "deleted") return null;
 
     const facts = data.facts.filter((f) => highlight.evidence_fact_ids.includes(f.fact_id));
     const chunkIds = [...new Set(facts.map((f) => f.chunk_id))];
@@ -283,6 +283,73 @@ export class ResumePipelineService {
     };
   }
 
+  /**
+   * Persists user-edited text. Does not change `experience_id` or `evidence_fact_ids` (traceability).
+   */
+  saveHighlightContent(
+    highlightId: string,
+    finalContent: string
+  ):
+    | { ok: true; highlight: Highlight }
+    | { ok: false; reason: "not_found" | "deleted" | "invalid_content" | "evidence_incomplete" } {
+    const trimmed = finalContent.trim();
+    if (!trimmed) return { ok: false, reason: "invalid_content" };
+
+    const snap = this.repo.snapshot();
+    const existing = snap.highlights.find((x) => x.highlight_id === highlightId);
+    if (!existing) return { ok: false, reason: "not_found" };
+    if (existing.status === "deleted") return { ok: false, reason: "deleted" };
+
+    const factIdsOk = existing.evidence_fact_ids.every((fid) =>
+      snap.facts.some((f) => f.fact_id === fid)
+    );
+    if (!factIdsOk) return { ok: false, reason: "evidence_incomplete" };
+    const exp = snap.experiences.find((e) => e.experience_id === existing.experience_id);
+    if (!exp) return { ok: false, reason: "evidence_incomplete" };
+
+    let saved: Highlight | null = null;
+    this.repo.mutate((data) => {
+      const idx = data.highlights.findIndex((x) => x.highlight_id === highlightId);
+      if (idx < 0) return;
+      const h = data.highlights[idx]!;
+      if (h.status === "deleted") return;
+      const next: Highlight = {
+        ...h,
+        content: trimmed,
+        final_content: trimmed,
+        is_edited: true,
+        status: "saved"
+      };
+      data.highlights[idx] = next;
+      saved = next;
+    });
+    return saved ? { ok: true, highlight: saved } : { ok: false, reason: "not_found" };
+  }
+
+  softDeleteHighlight(highlightId: string): { ok: true; highlight: Highlight } | { ok: false; reason: "not_found" | "already_deleted" } {
+    const snap = this.repo.snapshot();
+    const h0 = snap.highlights.find((x) => x.highlight_id === highlightId);
+    if (!h0) return { ok: false, reason: "not_found" };
+    if (h0.status === "deleted") return { ok: false, reason: "already_deleted" };
+
+    const now = new Date().toISOString();
+    let saved: Highlight | null = null;
+    this.repo.mutate((data) => {
+      const idx = data.highlights.findIndex((x) => x.highlight_id === highlightId);
+      if (idx < 0) return;
+      const h = data.highlights[idx]!;
+      if (h.status === "deleted") return;
+      const next: Highlight = {
+        ...h,
+        status: "deleted",
+        deleted_at: now
+      };
+      data.highlights[idx] = next;
+      saved = next;
+    });
+    return saved ? { ok: true, highlight: saved } : { ok: false, reason: "not_found" };
+  }
+
   rewriteHighlight(
     highlightId: string,
     style: Highlight["style"],
@@ -292,7 +359,7 @@ export class ResumePipelineService {
     this.repo.mutate((data) => {
       const h = data.highlights.find((x) => x.highlight_id === highlightId);
       const exp = data.experiences.find((e) => e.experience_id === h?.experience_id);
-      if (!h || !exp) return;
+      if (!h || !exp || h.status === "deleted") return;
       updated = applyRewrite(h, exp, style, targetJob);
       const idx = data.highlights.findIndex((x) => x.highlight_id === highlightId);
       if (idx >= 0) data.highlights[idx] = updated!;

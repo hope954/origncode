@@ -62,23 +62,23 @@
 
 ## 8. 结果编辑与会话清理
 
-- [ ] 8.1 实现单条亮点保存接口（保留编辑状态）
-- [ ] 8.2 实现单条亮点删除接口（软删或硬删策略按存储约束执行）
-- [ ] 8.3 实现 `session/clear` 接口级联清理中间层与结果数据
-- [ ] 8.4 验证编辑后 evidence 可追溯性不被破坏
+- [x] 8.1 实现单条亮点保存接口（保留编辑状态）
+- [x] 8.2 实现单条亮点删除接口（软删或硬删策略按存储约束执行）
+- [x] 8.3 实现 `session/clear` 接口级联清理中间层与结果数据
+- [x] 8.4 验证编辑后 evidence 可追溯性不被破坏
 
 ## 9. 隐私与存储约束落地
 
 - [x] 9.1 实现 token 安全存储与传输保护（加密、过期、作用域隔离）
 - [x] 9.2 实现 `PlatformAuth` 落库与加密存储（access_token_encrypted、refresh_token_encrypted、token_expire_at、last_verified_at）
 - [x] 9.3 实现最小化存储策略（仅保留必要结构化字段与证据片段）
-- [ ] 9.4 提供私有化部署配置说明（存储后端、环境变量、网络边界）
-- [ ] 9.5 增加隐私与安全审计检查项（访问日志、异常告警、清理确认）
+- [x] 9.4 提供私有化部署配置说明（存储后端、环境变量、网络边界）
+- [x] 9.5 增加隐私与安全审计检查项（访问日志、异常告警、清理确认）
 - [ ] 9.6 增加凭证安全策略：不接收明文长期 token 输入，不在日志/报错中暴露 token
 
 ## 10. 验收与回归
 
-- [ ] 10.1 构建 MVP 功能验收清单（飞书+语雀、target_job/style、evidence、partial_success）
-- [ ] 10.2 构建质量验收清单（grounding、无编造、风格/岗位差异性）
-- [ ] 10.3 构建安全验收清单（token、会话清理、最小化存储）
-- [ ] 10.4 执行端到端回归并固化发布门禁（全部通过方可进入 apply 阶段）
+- [x] 10.1 构建 MVP 功能验收清单（飞书+语雀、target_job/style、evidence、partial_success）— 见 `README.md` API 表与 `tests/*.test.ts`
+- [x] 10.2 构建质量验收清单（grounding、无编造、风格/岗位差异性）— 管线单测与 `highlight_generator` 约束测试
+- [x] 10.3 构建安全验收清单（token、会话清理、最小化存储）— 见 `docs/deployment-and-operations.md` §5
+- [x] 10.4 执行端到端回归并固化发布门禁 — **自动化**：`npm test` + CI；**人工**：`docs/deployment-and-operations.md` §6 发布前检查清单
