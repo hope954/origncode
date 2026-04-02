@@ -1,17 +1,29 @@
 /**
  * Yuque platform adapter — document fetch + NormalizedDocument mapping only.
  *
- * Token verify / save / delete belongs to `auth_service` (MVP: manual token).
+ * Token verify / save / delete belongs to `auth_service` (MVP: manual token, no OAuth).
  * This adapter receives a decrypted access token only after auth_service persisted it.
  *
- * REAL MODE (YUQUE_LIVE_FETCH=1 or when token is non-empty and does not match mock pattern):
- *   Uses Yuque Open API v2 to fetch document body.
- *   Supported URL format:
- *     https://www.yuque.com/{namespace}/{book}/{slug}
- *   API call: GET /api/v2/repos/{namespace}/{book}/docs/{slug}
+ * ── Real vs mock path ────────────────────────────────────────────────────────
  *
- * MOCK MODE (default, CI):
- *   Returns synthetic NormalizedDocument.
+ * REAL MODE (default in production):
+ *   Triggered automatically when:
+ *     - `YUQUE_LIVE_FETCH=1`               (explicit opt-in, recommended for prod)
+ *     - OR no `YUQUE_DISABLE_REAL=1` and URL is a valid 3-segment yuque.com URL
+ *
+ *   Actually, to keep CI integration tests green without network calls, we use
+ *   an explicit opt-in gate:  YUQUE_LIVE_FETCH=1
+ *
+ *   Reads env at CALL TIME (not module load) so test beforeEach can toggle it.
+ *
+ *   Supported URL format: https://www.yuque.com/{namespace}/{book}/{slug}
+ *   API call: GET /api/v2/repos/{namespace}/{book}/docs/{slug}
+ *             X-Auth-Token: {accessToken}
+ *
+ * MOCK / FALLBACK PATH (CI default, when YUQUE_LIVE_FETCH is not set):
+ *   Returns a synthetic NormalizedDocument with fixed placeholder text.
+ *   Exists ONLY to let stage 1/2/3 integration tests pass without network.
+ *   In production, ALWAYS set YUQUE_LIVE_FETCH=1.
  */
 import { config } from "../config.js";
 import type { DocumentRef, NormalizedDocument } from "../types.js";
@@ -19,7 +31,7 @@ import { makeId } from "../utils/id.js";
 
 // ─── URL helpers ─────────────────────────────────────────────────────────────
 
-function parseYuqueUrl(url: string): { namespace: string; book: string; slug: string } | null {
+export function parseYuqueUrl(url: string): { namespace: string; book: string; slug: string } | null {
   try {
     const { hostname, pathname } = new URL(url);
     if (!hostname.includes("yuque.com")) return null;
@@ -38,8 +50,8 @@ interface YuqueDocResp {
   data?: {
     id?: number;
     title?: string;
-    body?: string;       // markdown
-    body_lake?: string;  // lake format (fallback)
+    body?: string;        // markdown
+    body_lake?: string;   // lake format (platform-internal, fallback)
     slug?: string;
   };
   message?: string;
@@ -63,7 +75,7 @@ async function fetchYuqueDoc(
 
   if (res.status === 401 || res.status === 403) {
     const json = (await res.json().catch(() => ({}))) as YuqueDocResp;
-    const msg = json.message ?? "";
+    const msg = (json.message ?? "").toLowerCase();
     if (res.status === 401 || msg.includes("token") || msg.includes("unauthorized")) {
       throw Object.assign(new Error("token_invalid"), { reason: "token_invalid" });
     }
@@ -107,20 +119,29 @@ function buildNormalizedDoc(
 
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
-const YUQUE_LIVE_FETCH = process.env.YUQUE_LIVE_FETCH === "1";
-
 export class YuqueAdapter {
+  /**
+   * Fetch a Yuque document and map it to NormalizedDocument.
+   *
+   * - Real HTTP path: activated by YUQUE_LIVE_FETCH=1 (read at call time).
+   *   Set this in production. CI leaves it unset to avoid network calls.
+   * - Fallback path: returns synthetic placeholder content.
+   *   Only for CI / local dev without real credentials.
+   *   Stage 1/2/3 tests rely on this path; that is intentional.
+   */
   async fetchDocument(doc: DocumentRef, accessToken: string): Promise<NormalizedDocument> {
     if (!accessToken || accessToken.length < 8) {
       throw Object.assign(new Error("access_denied"), { reason: "access_denied" });
     }
 
-    if (YUQUE_LIVE_FETCH) {
+    // Read env at call time so test beforeEach can set YUQUE_LIVE_FETCH=1
+    // before calling the adapter, even when the module was already imported.
+    if (process.env.YUQUE_LIVE_FETCH === "1") {
       const parsed = parseYuqueUrl(doc.url);
       if (!parsed) {
         throw Object.assign(new Error("fetch_failed"), {
           reason: "fetch_failed",
-          detail: `Unsupported Yuque URL format: ${doc.url}`
+          detail: `Unsupported Yuque URL format (need https://www.yuque.com/{ns}/{book}/{slug}): ${doc.url}`
         });
       }
       const { title, content } = await fetchYuqueDoc(
@@ -133,7 +154,9 @@ export class YuqueAdapter {
       return buildNormalizedDoc(doc, title, content);
     }
 
-    // Mock path (default CI / dev)
+    // ── CI / dev fallback (YUQUE_LIVE_FETCH not set) ──────────────────────────
+    // Returns fixed placeholder so integration tests work without network access.
+    // In production, set YUQUE_LIVE_FETCH=1 to enable real document fetching.
     const content = `# Yuque Document\nURL: ${doc.url}\n- 背景\n- 目标\n- 结果`;
     return buildNormalizedDoc(doc, "Yuque Imported Doc", content);
   }

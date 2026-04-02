@@ -30,13 +30,14 @@
 | `FEISHU_REDIRECT_URI` | 飞书 OAuth 回调地址；需与飞书应用配置保持一致 | — |
 | `FEISHU_BASE_URL` | 飞书 Open API 基础地址；私有区域或代理场景可覆盖 | `https://open.feishu.cn` |
 | `YUQUE_BASE_URL` | 语雀 Open API 基础地址 | `https://www.yuque.com` |
-| `YUQUE_LIVE_VERIFY` | 设为 `1` 启用真实 GET `/api/v2/user` token 探测 | 不设 → 仅结构校验 |
-| `YUQUE_LIVE_FETCH` | 设为 `1` 启用真实 YuqueAdapter 文档拉取 | 不设 → mock 文本 |
+| `YUQUE_LIVE_VERIFY` | 设为 `1` 启用真实 GET `/api/v2/user` token 探测 | 不设 → 仅结构校验（前缀+长度）|
+| `YUQUE_LIVE_FETCH` | **生产必设**；设为 `1` 启用真实 YuqueAdapter 文档拉取 | 不设 → CI/dev fallback 固定文本 |
 
 说明：
 - `TOKEN_ENCRYPTION_KEY` 继续用于加密保存 **飞书 access/refresh token** 与 **语雀 access token**，Stage 4 已验证。
-- CI 不设 `FEISHU_APP_ID` / `YUQUE_LIVE_FETCH`，走 mock 路径，保持 green 无需真实凭据。
-- `FEISHU_APP_ID` 缺失时，`getAuthUrl` 仍返回有效 URL（无 app_id 参数），上层逻辑不会因此中断。
+- **CI** 不设 `FEISHU_APP_ID` / `YUQUE_LIVE_FETCH`，全部走 fallback 路径，保持 green，无需真实凭据。
+- **生产** 必须设 `FEISHU_APP_ID + FEISHU_APP_SECRET` 才能启用飞书真实接入；必须设 `YUQUE_LIVE_FETCH=1` 才能启用语雀真实文档拉取。
+- `FEISHU_APP_ID` 缺失时，`getAuthUrl` 仍返回可用 URL（只是无 `app_id` 参数，无法完成授权），上层逻辑不崩溃。
 
 复制 `.env.example` → `.env` 并按环境填写。勿将 `.env` 提交到版本库。
 
